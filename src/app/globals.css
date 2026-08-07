@@ -649,25 +649,27 @@ select:disabled {
 
 .ms-tile-media {
   position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  aspect-ratio: 4 / 5;
+  aspect-ratio: 1 / 1;
   background: var(--ms-ivory);
-  padding: 24px;
+  /* Tight inset — photos fill the frame more evenly */
+  padding: 10px;
+  overflow: hidden;
 }
 
 .ms-tile-img {
-  width: auto;
-  height: 70%;
-  max-width: 100%;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none;
   object-fit: contain;
+  object-position: center;
+  /* Soft zoom crops vendor PNG whitespace so products look similar size */
+  transform: scale(1.14);
   transition: transform 0.55s ease;
   mix-blend-mode: multiply;
 }
 
 .ms-tile:hover .ms-tile-img {
-  transform: scale(1.035);
+  transform: scale(1.18);
 }
 
 .ms-tile-badges {
@@ -1184,7 +1186,10 @@ select:disabled {
     transform: none;
   }
 
-  .ms-tile:hover .ms-tile-img,
+  .ms-tile:hover .ms-tile-img {
+    transform: scale(1.14);
+  }
+
   .ms-preowned-feature:hover .ms-preowned-img {
     transform: none;
   }

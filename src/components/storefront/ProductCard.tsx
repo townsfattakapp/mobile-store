@@ -44,15 +44,14 @@ export function ProductCard({ product, priority = false, prefetch = true }: Prod
         prefetch={prefetch}
         className="flex flex-col flex-1 min-h-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b2f7c] focus-visible:ring-offset-2 rounded-[28px]"
       >
-        <div className="relative w-full pt-10 px-6 pb-6 bg-[#fbfbfd] flex items-center justify-center min-h-[280px]">
+        <div className="relative w-full aspect-square px-2.5 py-2.5 bg-[#fbfbfd] overflow-hidden">
           <ProductImage
             src={image}
             alt={product.name}
             priority={priority}
-            width={400}
-            height={500}
+            fill
             sizes="(max-width: 640px) 85vw, (max-width: 1024px) 45vw, 280px"
-            className="object-contain h-[250px] w-auto max-w-full group-hover:scale-105 transition-transform duration-700 ease-out drop-shadow-lg"
+            className="object-contain object-center !w-full !h-full scale-[1.14] group-hover:scale-[1.18] transition-transform duration-700 ease-out drop-shadow-lg mix-blend-multiply"
           />
         </div>
 

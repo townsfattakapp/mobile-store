@@ -50,8 +50,7 @@ export function HomeProductTile({ product, priority = false, tone = "light" }: P
             src={product.main_image_url}
             alt={name}
             priority={priority}
-            width={480}
-            height={560}
+            fill
             sizes="(max-width: 768px) 70vw, 280px"
             className="ms-tile-img"
           />
