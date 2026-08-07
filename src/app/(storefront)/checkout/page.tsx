@@ -41,16 +41,13 @@ export default function CheckoutPage() {
 
   if (items.length === 0) {
     return (
-      <div className="min-h-[60vh] flex flex-col items-center justify-center bg-gray-50 px-4">
-        <h1 className="text-3xl font-black mb-4 text-center">Your Cart is Empty</h1>
-        <p className="text-[#6e6e73] mb-8 text-center max-w-md">
-          Looks like you haven&apos;t added anything to your cart yet.
+      <div className="ms-page min-h-[55vh] flex flex-col items-center justify-center px-5 py-16 text-center">
+        <h1 className="ms-display ms-display--md mb-3">Your cart is empty</h1>
+        <p className="ms-lede ms-lede--narrow mb-8">
+          Add a phone or accessory, then come back to checkout.
         </p>
-        <Link
-          href="/new-mobiles"
-          className="bg-black text-white px-8 py-4 rounded-xl font-bold hover:bg-gray-900 transition-colors"
-        >
-          Continue Shopping
+        <Link href="/new-mobiles" className="ms-btn ms-btn--primary">
+          Continue shopping
         </Link>
       </div>
     );
@@ -76,7 +73,6 @@ export default function CheckoutPage() {
       throw new Error(created.error || "Could not start payment");
     }
 
-    // Demo mode (no Razorpay keys): verify immediately with signed demo payment
     if (created.mode === "demo") {
       const verifyRes = await fetch("/api/payments/razorpay/verify", {
         method: "POST",
@@ -95,7 +91,7 @@ export default function CheckoutPage() {
 
     const ok = await loadRazorpayScript();
     if (!ok || !window.Razorpay) {
-      throw new Error("Failed to load Razorpay checkout");
+      throw new Error("Failed to load payment checkout");
     }
 
     await new Promise<void>((resolve, reject) => {
@@ -103,7 +99,7 @@ export default function CheckoutPage() {
         key: created.keyId,
         amount: created.amount,
         currency: created.currency || "INR",
-        name: "MobiStore",
+        name: "Mahadev Mobiles",
         description: `Order ${orderNumber}`,
         order_id: created.razorpayOrderId,
         handler: async (response: {
@@ -135,9 +131,9 @@ export default function CheckoutPage() {
         },
         modal: {
           ondismiss: () =>
-            reject(new Error("Payment cancelled. You can retry from support.")),
+            reject(new Error("Payment cancelled. You can try again.")),
         },
-        theme: { color: "#111111" },
+        theme: { color: "#3b2f7c" },
       });
       rzp.open();
     });
@@ -174,268 +170,208 @@ export default function CheckoutPage() {
     }
   };
 
+  const submitLabel =
+    paymentMethod === "online" ? "Pay securely" : "Place order";
+
   return (
-    <div className="min-h-screen bg-gray-50 pb-20">
-      <div className="container mx-auto px-4 py-8 lg:py-12">
-        <div className="flex items-center gap-2 mb-8 text-sm font-medium text-gray-500">
-          <Lock size={16} className="text-green-600" />
-          <span className="text-green-700">Secure Checkout</span>
+    <div className="ms-page ms-checkout">
+      <div className="ms-shell ms-checkout-shell">
+        <div className="ms-checkout-badge">
+          <Lock size={14} aria-hidden />
+          <span>Secure checkout</span>
         </div>
 
-        <form
-          onSubmit={handleSubmit}
-          className="flex flex-col-reverse lg:flex-row gap-8 lg:gap-12 items-start"
-        >
-          <div className="w-full lg:w-2/3 space-y-8">
-            <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border">
-              <h2 className="text-2xl font-bold mb-6">Delivery Details</h2>
+        <form onSubmit={handleSubmit} className="ms-checkout-layout" id="checkout-form">
+          {/* Order summary — top on mobile, side on desktop */}
+          <aside className="ms-checkout-summary" aria-label="Order summary">
+            <div className="ms-checkout-card">
+              <div className="ms-checkout-summary-head">
+                <h2>Order summary</h2>
+                <span>
+                  {items.length} {items.length === 1 ? "item" : "items"}
+                </span>
+              </div>
 
-              {error && (
-                <div className="bg-red-50 text-red-600 p-4 rounded-lg mb-6 text-sm font-medium border border-red-100">
-                  {error}
-                </div>
-              )}
+              <ul className="ms-checkout-items">
+                {items.map((item) => (
+                  <li key={`${item.productId}-${item.variantId}`}>
+                    <div className="ms-checkout-thumb">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={item.image} alt="" />
+                    </div>
+                    <div className="ms-checkout-item-meta">
+                      <p className="ms-checkout-item-name">{item.name}</p>
+                      {item.variantName ? (
+                        <p className="ms-checkout-item-variant">{item.variantName}</p>
+                      ) : null}
+                      <div className="ms-checkout-item-row">
+                        <span>Qty {item.quantity}</span>
+                        <strong>
+                          ₹{(item.price * item.quantity).toLocaleString("en-IN")}
+                        </strong>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="col-span-1 md:col-span-2">
-                  <label className="block text-sm font-semibold text-[#1d1d1f] mb-2">
-                    Full Name
-                  </label>
-                  <input
-                    required
-                    name="fullName"
-                    type="text"
-                    className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-[#1d1d1f] placeholder:text-[#6e6e73] focus:ring-2 focus:ring-black outline-none transition-all"
-                    placeholder="John Doe"
-                  />
-                </div>
-
+              <div className="ms-checkout-totals">
                 <div>
-                  <label className="block text-sm font-semibold text-[#1d1d1f] mb-2">
-                    Email Address
-                  </label>
-                  <input
-                    required
-                    name="email"
-                    type="email"
-                    className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-[#1d1d1f] placeholder:text-[#6e6e73] focus:ring-2 focus:ring-black outline-none transition-all"
-                    placeholder="john@example.com"
-                  />
+                  <span>Subtotal</span>
+                  <span>₹{subtotal.toLocaleString("en-IN")}</span>
                 </div>
-
                 <div>
-                  <label className="block text-sm font-semibold text-[#1d1d1f] mb-2">
-                    Phone Number
-                  </label>
-                  <input
-                    required
-                    name="phone"
-                    type="tel"
-                    className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-[#1d1d1f] placeholder:text-[#6e6e73] focus:ring-2 focus:ring-black outline-none transition-all"
-                    placeholder="+91 98765 43210"
-                  />
+                  <span>Shipping</span>
+                  <span>
+                    {shipping === 0 ? "Free" : `₹${shipping.toLocaleString("en-IN")}`}
+                  </span>
                 </div>
-
-                <div className="col-span-1 md:col-span-2">
-                  <label className="block text-sm font-semibold text-[#1d1d1f] mb-2">
-                    Full Address
-                  </label>
-                  <textarea
-                    required
-                    name="address"
-                    rows={3}
-                    className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-[#1d1d1f] placeholder:text-[#6e6e73] focus:ring-2 focus:ring-black outline-none transition-all resize-none"
-                    placeholder="123 Main Street, Appt 4B"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-[#1d1d1f] mb-2">
-                    City
-                  </label>
-                  <input
-                    required
-                    name="city"
-                    type="text"
-                    className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-[#1d1d1f] placeholder:text-[#6e6e73] focus:ring-2 focus:ring-black outline-none transition-all"
-                    placeholder="Mumbai"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
+                <div className="ms-checkout-grand">
+                  <span>Total</span>
                   <div>
-                    <label className="block text-sm font-semibold text-[#1d1d1f] mb-2">
-                      State
-                    </label>
-                    <input
-                      required
-                      name="state"
-                      type="text"
-                      className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-[#1d1d1f] placeholder:text-[#6e6e73] focus:ring-2 focus:ring-black outline-none transition-all"
-                      placeholder="MH"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-[#1d1d1f] mb-2">
-                      PIN Code
-                    </label>
-                    <input
-                      required
-                      name="pinCode"
-                      type="text"
-                      className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-[#1d1d1f] placeholder:text-[#6e6e73] focus:ring-2 focus:ring-black outline-none transition-all"
-                      placeholder="400001"
-                    />
+                    <strong>₹{grandTotal.toLocaleString("en-IN")}</strong>
+                    <small>Inclusive of taxes</small>
                   </div>
                 </div>
               </div>
-            </div>
 
-            <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border">
-              <h2 className="text-2xl font-bold mb-2">Payment Method</h2>
-              <p className="text-sm text-[#6e6e73] mb-6">
-                Online payments use Razorpay (UPI / cards / netbanking). Without
-                API keys, demo mode completes a signed test payment locally.
+              <button
+                type="submit"
+                disabled={loading}
+                className="ms-checkout-submit ms-checkout-submit--desktop"
+              >
+                {loading ? (
+                  <span className="ms-checkout-spinner" aria-hidden />
+                ) : (
+                  <>
+                    <ShieldCheck size={18} aria-hidden />
+                    {submitLabel}
+                  </>
+                )}
+              </button>
+              <p className="ms-checkout-legal ms-checkout-legal--desktop">
+                By ordering you agree to our Terms and Privacy Policy.
+              </p>
+            </div>
+          </aside>
+
+          <div className="ms-checkout-main">
+            <section className="ms-checkout-card">
+              <h2>Delivery details</h2>
+
+              {error ? (
+                <div className="ms-checkout-error" role="alert">
+                  {error}
+                </div>
+              ) : null}
+
+              <div className="ms-checkout-fields">
+                <label className="ms-checkout-field ms-checkout-field--full">
+                  <span>Full name</span>
+                  <input required name="fullName" type="text" autoComplete="name" placeholder="Your full name" />
+                </label>
+
+                <label className="ms-checkout-field">
+                  <span>Email</span>
+                  <input required name="email" type="email" autoComplete="email" inputMode="email" placeholder="you@example.com" />
+                </label>
+
+                <label className="ms-checkout-field">
+                  <span>Phone</span>
+                  <input required name="phone" type="tel" autoComplete="tel" inputMode="tel" placeholder="98765 43210" />
+                </label>
+
+                <label className="ms-checkout-field ms-checkout-field--full">
+                  <span>Address</span>
+                  <textarea required name="address" rows={3} autoComplete="street-address" placeholder="House / street / landmark" />
+                </label>
+
+                <label className="ms-checkout-field">
+                  <span>City</span>
+                  <input required name="city" type="text" autoComplete="address-level2" placeholder="Tiroda" />
+                </label>
+
+                <label className="ms-checkout-field">
+                  <span>State</span>
+                  <input required name="state" type="text" autoComplete="address-level1" placeholder="Maharashtra" />
+                </label>
+
+                <label className="ms-checkout-field">
+                  <span>PIN code</span>
+                  <input required name="pinCode" type="text" autoComplete="postal-code" inputMode="numeric" placeholder="441911" />
+                </label>
+              </div>
+            </section>
+
+            <section className="ms-checkout-card">
+              <h2>Payment</h2>
+              <p className="ms-checkout-hint">
+                Pay online with UPI, card, or netbanking — or choose cash on delivery.
               </p>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="ms-checkout-pay-grid">
                 <label
-                  className={`relative flex flex-col p-5 border-2 cursor-pointer rounded-2xl transition-colors ${
-                    paymentMethod === "online"
-                      ? "border-black bg-black/5"
-                      : "hover:bg-gray-50"
+                  className={`ms-checkout-pay ${
+                    paymentMethod === "online" ? "is-active" : ""
                   }`}
                 >
                   <input
                     type="radio"
                     name="paymentMethodRadio"
-                    className="absolute opacity-0"
                     checked={paymentMethod === "online"}
                     onChange={() => setPaymentMethod("online")}
                   />
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="font-bold text-black">Pay Online</span>
-                    <CreditCard className="text-gray-400" />
-                  </div>
-                  <span className="text-sm text-[#6e6e73]">
-                    Razorpay — UPI, Cards, Netbanking
+                  <span className="ms-checkout-pay-top">
+                    <strong>Pay online</strong>
+                    <CreditCard size={18} aria-hidden />
                   </span>
+                  <span className="ms-checkout-pay-sub">UPI · Cards · Netbanking</span>
                 </label>
 
                 <label
-                  className={`relative flex flex-col p-5 border-2 cursor-pointer rounded-2xl transition-colors ${
-                    paymentMethod === "cod"
-                      ? "border-black bg-black/5"
-                      : "hover:bg-gray-50"
+                  className={`ms-checkout-pay ${
+                    paymentMethod === "cod" ? "is-active" : ""
                   }`}
                 >
                   <input
                     type="radio"
                     name="paymentMethodRadio"
-                    className="absolute opacity-0"
                     checked={paymentMethod === "cod"}
                     onChange={() => setPaymentMethod("cod")}
                   />
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="font-bold text-black">Cash on Delivery</span>
-                    <Banknote className="text-gray-400" />
-                  </div>
-                  <span className="text-sm text-[#6e6e73]">
-                    Pay when your order arrives
+                  <span className="ms-checkout-pay-top">
+                    <strong>Cash on delivery</strong>
+                    <Banknote size={18} aria-hidden />
                   </span>
+                  <span className="ms-checkout-pay-sub">Pay when your order arrives</span>
                 </label>
               </div>
-            </div>
-          </div>
-
-          <div className="w-full lg:w-1/3 bg-white p-6 md:p-8 rounded-3xl shadow-sm border sticky top-24">
-            <h2 className="text-xl font-bold mb-6 flex items-center justify-between">
-              Order Summary
-              <span className="bg-gray-100 text-gray-600 text-sm py-1 px-3 rounded-full">
-                {items.length} Items
-              </span>
-            </h2>
-
-            <div className="space-y-4 mb-6 max-h-64 overflow-y-auto pr-2">
-              {items.map((item) => (
-                <div
-                  key={`${item.productId}-${item.variantId}`}
-                  className="flex gap-4"
-                >
-                  <div className="w-16 h-20 bg-gray-50 rounded-lg flex items-center justify-center p-2 border shrink-0">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={item.image}
-                      alt={item.name}
-                      className="object-contain max-h-full mix-blend-multiply"
-                    />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h4 className="font-semibold text-sm truncate">{item.name}</h4>
-                    <p className="text-xs text-[#6e6e73] mb-1 truncate">
-                      {item.variantName}
-                    </p>
-                    <div className="flex justify-between items-center mt-2">
-                      <span className="text-xs font-medium text-gray-600">
-                        Qty: {item.quantity}
-                      </span>
-                      <span className="font-bold text-sm">
-                        ₹{(item.price * item.quantity).toLocaleString()}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="border-t pt-4 space-y-3 mb-6">
-              <div className="flex justify-between text-gray-600">
-                <span>Subtotal</span>
-                <span className="font-medium text-black">
-                  ₹{subtotal.toLocaleString()}
-                </span>
-              </div>
-              <div className="flex justify-between text-gray-600">
-                <span>Shipping</span>
-                <span className="font-medium text-black">
-                  {shipping === 0 ? "Free" : `₹${shipping.toLocaleString()}`}
-                </span>
-              </div>
-              <div className="border-t pt-4 flex justify-between items-end mt-2">
-                <span className="font-bold text-lg">Total</span>
-                <div className="text-right">
-                  <span className="font-black text-2xl">
-                    ₹{grandTotal.toLocaleString()}
-                  </span>
-                  <p className="text-xs text-[#6e6e73] mt-1">
-                    Inclusive of all taxes
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-black text-white py-4 rounded-xl font-bold text-lg hover:bg-gray-900 transition-colors shadow-lg shadow-black/10 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
-              {loading ? (
-                <div className="h-5 w-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              ) : (
-                <>
-                  <ShieldCheck size={20} />
-                  {paymentMethod === "online"
-                    ? "Pay Securely"
-                    : "Place Order Securely"}
-                </>
-              )}
-            </button>
-            <p className="text-center text-xs text-[#6e6e73] mt-4">
-              By placing your order, you agree to our Terms of Service and Privacy
-              Policy.
-            </p>
+            </section>
           </div>
         </form>
+      </div>
+
+      {/* Mobile sticky pay bar */}
+      <div className="ms-checkout-bar">
+        <div className="ms-checkout-bar-total">
+          <span>Total</span>
+          <strong>₹{grandTotal.toLocaleString("en-IN")}</strong>
+        </div>
+        <button
+          type="submit"
+          form="checkout-form"
+          disabled={loading}
+          className="ms-checkout-submit"
+        >
+          {loading ? (
+            <span className="ms-checkout-spinner" aria-hidden />
+          ) : (
+            <>
+              <ShieldCheck size={18} aria-hidden />
+              {submitLabel}
+            </>
+          )}
+        </button>
       </div>
     </div>
   );

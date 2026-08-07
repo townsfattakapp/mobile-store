@@ -90,7 +90,7 @@ export function Footer() {
         </div>
 
         <div className="ms-footer-grid">
-          <div className="ms-footer-col">
+          <div className="ms-footer-col ms-footer-col--shop">
             <h4 className="ms-footer-heading">Shop</h4>
             <ul className="ms-footer-list">
               {SHOP.map((item) => (
@@ -104,7 +104,7 @@ export function Footer() {
             </ul>
           </div>
 
-          <div className="ms-footer-col">
+          <div className="ms-footer-col ms-footer-col--support">
             <h4 className="ms-footer-heading">Support</h4>
             <ul className="ms-footer-list">
               {SUPPORT.map((item) => (
