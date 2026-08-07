@@ -651,10 +651,10 @@ export default function NewProductPage() {
                           className="bg-[#0B5cff] text-white hover:bg-[#004BBF]"
                         >
                           {isImportingAll
-                            ? "Importing all..."
+                            ? "Adding all..."
                             : listFilter.trim()
-                              ? `Scrape & Add ${filteredScrapedLinks.length} Shown`
-                              : "Scrape & Add All Models"}
+                              ? `Add ${filteredScrapedLinks.length} Shown`
+                              : "Add All Models"}
                         </Button>
                       </div>
 
@@ -726,7 +726,7 @@ export default function NewProductPage() {
                                  disabled={fetchingUrl !== null || isImportingAll}
                                  className="bg-black text-white hover:bg-gray-800 shrink-0"
                                >
-                                  {fetchingUrl === link.url ? "Scraping..." : "Scrape & Add"}
+                                  {fetchingUrl === link.url ? "Adding..." : "Add"}
                                 </Button>
                             </div>
                            ))
@@ -743,7 +743,7 @@ export default function NewProductPage() {
                         Tip: Paste a brand hub like{" "}
                         <span className="font-mono">samsung.com/in</span>,{" "}
                         <span className="font-mono">apple.com/in/iphone</span>, or{" "}
-                        <span className="font-mono">ambraneindia.com</span> — Smart Scrape lists models, then use Scrape &amp; Add.
+                        <span className="font-mono">ambraneindia.com</span> — Discover Models lists them, then use Add.
                       </p>
                     )}
                     <div className="flex flex-wrap justify-center gap-3">
@@ -755,8 +755,8 @@ export default function NewProductPage() {
                           {fetchingUrl === searchQuery
                             ? "Working..."
                             : isUrl
-                              ? "Smart Scrape (auto-detect category)"
-                              : "Auto-Fetch Specs (Single Device)"}
+                              ? "Discover Models"
+                              : "Find Specs (Single Device)"}
                         </Button>
                         {isUrl && (
                            <Button 
@@ -765,7 +765,7 @@ export default function NewProductPage() {
                               variant="outline"
                               className="border-[#0B5cff] text-[#0B5cff] hover:bg-blue-50 transition-colors flex items-center gap-2"
                             >
-                              {isBulkScraping ? "Scanning lineup..." : "Scan for all models on page"}
+                              {isBulkScraping ? "Finding models..." : "Find all models on page"}
                             </Button>
                         )}
                     </div>
@@ -955,7 +955,7 @@ export default function NewProductPage() {
             <h4 className="font-medium text-gray-700 mb-3">Select Variants to List</h4>
             {(!selectedDevice.variants || selectedDevice.variants.length === 0) && (
               <p className="text-sm text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-4">
-                This master device has no variants. Re-scrape it, or create the product manually.
+                This master device has no variants. Add it again from the catalog, or create the product manually.
               </p>
             )}
             <div className="space-y-4">

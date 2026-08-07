@@ -29,7 +29,7 @@ export async function bulkScrapeCategoryLinks(url: string) {
           : "No product models found. Try a more specific product URL.",
     };
   } catch (error: any) {
-    return { success: false, error: error.message || "Failed to scrape links" };
+    return { success: false, error: error.message || "Failed to find models on this page" };
   }
 }
 
@@ -65,7 +65,7 @@ export async function smartScrapeOrExpand(url: string) {
             success: true,
             mode: "expand" as const,
             items: list,
-            message: `Could not scrape that Samsung URL directly. Showing ${list.length} phones from Samsung India — pick one and Scrape & Add.`,
+            message: `Could not load that Samsung URL directly. Showing ${list.length} phones from Samsung India — pick one and Add.`,
           };
         }
       }
@@ -114,7 +114,7 @@ export async function smartScrapeOrExpand(url: string) {
     }
     return { success: false, error: result.error };
   } catch (error: any) {
-    return { success: false, error: error.message || "Smart scrape failed" };
+    return { success: false, error: error.message || "Could not discover models from this URL" };
   }
 }
 
@@ -259,12 +259,12 @@ export async function autoFetchAndSaveMasterDevice(query: string) {
         return {
           success: false,
           error:
-            "Could not scrape this URL (page blocked, not a product page, or no product data found). Try a direct product or buy page, or Expand a category hub first.",
+            "Could not load this URL (page blocked, not a product page, or no product data found). Try a direct product or buy page, or discover models from a brand hub first.",
         };
       }
       return {
         success: false,
-        error: "Device not found on external web APIs or scraper.",
+        error: "Device not found from this URL or name.",
       };
     }
 
@@ -529,7 +529,7 @@ export async function autoFetchAndSaveMasterDevice(query: string) {
     }
     const msg = error?.message || "An unexpected error occurred.";
     if (/samsung\.com/i.test(query)) {
-      return { success: false, error: `Samsung save/scrape failed: ${msg}` };
+      return { success: false, error: `Could not save Samsung device: ${msg}` };
     }
     return { success: false, error: msg };
   }

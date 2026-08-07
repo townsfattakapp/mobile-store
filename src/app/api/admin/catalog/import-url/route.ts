@@ -302,7 +302,7 @@ export async function POST(req: NextRequest) {
               success: true,
               mode: "expand",
               items,
-              message: `Could not scrape that URL. Showing ${items.length} Samsung phones — pick one.`,
+              message: `Could not load that URL. Showing ${items.length} Samsung phones — pick one.`,
             });
           }
         }
@@ -321,7 +321,7 @@ export async function POST(req: NextRequest) {
       if (!fetched?.model_name) {
         return NextResponse.json({
           success: false,
-          error: "Scrape returned no product data for this URL.",
+          error: "No product data found for this URL.",
         });
       }
 
