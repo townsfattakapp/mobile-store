@@ -72,9 +72,10 @@ export function ProductImage({
     if (!smartFit) return undefined;
     return {
       ["--fit-scale" as string]: String(fit.scale),
-      transformOrigin: `${fit.originX * 100}% ${fit.originY * 100}%`,
+      // Always scale from card center so the subject stays visually centered
+      transformOrigin: "center center",
     } as React.CSSProperties;
-  }, [smartFit, fit]);
+  }, [smartFit, fit.scale]);
 
   const shared = {
     src: url,
