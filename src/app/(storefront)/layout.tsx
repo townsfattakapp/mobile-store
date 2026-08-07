@@ -1,4 +1,4 @@
-import React from "react";
+import React, { Suspense } from "react";
 import { Fraunces, Plus_Jakarta_Sans } from "next/font/google";
 import type { Metadata } from "next";
 import { Header } from "@/components/storefront/Header";
@@ -6,6 +6,7 @@ import { Footer } from "@/components/storefront/Footer";
 import { CartDrawer } from "@/components/storefront/CartDrawer";
 import { StoreConfigProvider } from "@/components/storefront/StoreConfigProvider";
 import { InstagramReelsSection } from "@/components/storefront/InstagramReelsSection";
+import { ScrollToTop } from "@/components/storefront/ScrollToTop";
 import { getStorefrontProfile } from "@/lib/store/profile";
 
 const display = Fraunces({
@@ -37,6 +38,9 @@ export default async function StorefrontLayout({ children }: { children: React.R
       style={{ fontFamily: "var(--font-ms-body), ui-sans-serif, system-ui, sans-serif" }}
     >
       <StoreConfigProvider value={profile}>
+        <Suspense fallback={null}>
+          <ScrollToTop />
+        </Suspense>
         <Header />
         <CartDrawer />
         <main className="flex-1">{children}</main>
