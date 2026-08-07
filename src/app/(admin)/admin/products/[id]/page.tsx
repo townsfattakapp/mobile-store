@@ -4,21 +4,24 @@ import React, { useEffect, useState, use } from "react";
 import { createClient } from "@/utils/supabase/client";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { ArrowLeft, Save, Plus, Trash2, CheckCircle, ShieldAlert } from "lucide-react";
+import { ArrowLeft, Save, Plus, Trash2, ShieldAlert } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+
+type CategoryOption = { id: string; name: string; active: boolean };
 
 export default function EditProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const router = useRouter();
   const supabase = createClient();
   const [activeTab, setActiveTab] = useState("basic");
   
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [saveOk, setSaveOk] = useState(false);
   const [product, setProduct] = useState<any>(null);
   const [variants, setVariants] = useState<any[]>([]);
   const [inspection, setInspection] = useState<any>({});
+  const [categories, setCategories] = useState<CategoryOption[]>([]);
   
   useEffect(() => {
     fetchProductData();
@@ -26,7 +29,16 @@ export default function EditProductPage({ params }: { params: Promise<{ id: stri
 
   const fetchProductData = async () => {
     setLoading(true);
-    const { data: pData } = await supabase.from("products").select("*, master_devices(model_name)").eq("id", id).single();
+    const [{ data: pData }, { data: catData }] = await Promise.all([
+      supabase.from("products").select("*, master_devices(model_name)").eq("id", id).single(),
+      supabase
+        .from("categories")
+        .select("id, name, active")
+        .order("name", { ascending: true }),
+    ]);
+
+    setCategories(catData || []);
+
     if (pData) {
       setProduct(pData);
       
@@ -88,6 +100,8 @@ export default function EditProductPage({ params }: { params: Promise<{ id: stri
 
   const handleSave = async () => {
     setSaving(true);
+    setSaveError("");
+    setSaveOk(false);
     
     // Save Product
     // Filter out any empty offers before saving
@@ -102,7 +116,9 @@ export default function EditProductPage({ params }: { params: Promise<{ id: stri
       stock_quantity: product.stock_quantity,
       status: product.status,
       short_description: product.short_description,
-      specifications: finalSpecs
+      category_id: product.category_id || null,
+      specifications: finalSpecs,
+      updated_at: new Date().toISOString(),
     }).eq("id", id);
 
     // Save Variants
@@ -117,7 +133,7 @@ export default function EditProductPage({ params }: { params: Promise<{ id: stri
 
     // Save Inspection if used mobile
     if (product?.type === 'used_mobile') {
-      const { data: existingInspection } = await supabase.from("used_device_inspections").select("product_id").eq("product_id", id).single();
+      const { data: existingInspection } = await supabase.from("used_device_inspections").select("product_id").eq("product_id", id).maybeSingle();
       
       if (existingInspection) {
         await supabase.from("used_device_inspections").update(inspection).eq("product_id", id);
@@ -127,8 +143,8 @@ export default function EditProductPage({ params }: { params: Promise<{ id: stri
     }
 
     setSaving(false);
-    if (pErr) alert("Error saving: " + pErr.message);
-    else alert("Product saved successfully!");
+    if (pErr) setSaveError(pErr.message);
+    else setSaveOk(true);
   };
 
   if (loading) return <div className="p-8">Loading product...</div>;
@@ -168,14 +184,48 @@ export default function EditProductPage({ params }: { params: Promise<{ id: stri
             <Input label="Total Stock" name="stock_quantity" type="number" value={product.stock_quantity} onChange={handleProductChange} />
           </div>
           
-          <div>
-             <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-             <select name="status" value={product.status} onChange={handleProductChange} className="w-full md:w-1/3 px-4 py-2 border border-gray-300 rounded-lg focus:ring-black text-[#1d1d1f] bg-white">
-               <option value="draft">Draft (Hidden)</option>
-               <option value="active">Active (Visible)</option>
-               <option value="archived">Archived</option>
-             </select>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+             <div>
+               <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+               <select name="status" value={product.status} onChange={handleProductChange} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-black text-[#1d1d1f] bg-white">
+                 <option value="draft">Draft (Hidden)</option>
+                 <option value="active">Active (Visible)</option>
+                 <option value="archived">Archived</option>
+               </select>
+             </div>
+             <div>
+               <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+               <select
+                 name="category_id"
+                 value={product.category_id || ""}
+                 onChange={handleProductChange}
+                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-black text-[#1d1d1f] bg-white"
+               >
+                 <option value="">Uncategorized</option>
+                 {categories.map((cat) => (
+                   <option key={cat.id} value={cat.id} disabled={!cat.active && product.category_id !== cat.id}>
+                     {cat.name}{!cat.active ? " (inactive)" : ""}
+                   </option>
+                 ))}
+               </select>
+               <p className="mt-1 text-xs text-gray-500">
+                 Manage list in{" "}
+                 <Link href="/admin/categories" className="underline underline-offset-2">
+                   Categories
+                 </Link>
+                 .
+               </p>
+             </div>
           </div>
+
+          {saveError ? (
+            <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{saveError}</p>
+          ) : null}
+          {saveOk ? (
+            <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+              Product saved.
+            </p>
+          ) : null}
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
