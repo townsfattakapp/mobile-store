@@ -649,18 +649,18 @@ select:disabled {
 
 .ms-tile-media {
   position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   aspect-ratio: 4 / 5;
   background: var(--ms-ivory);
-  padding: 16px 18px;
+  /* Breathing room — products stay mid-size, not edge-to-edge */
+  padding: 0;
   overflow: hidden;
 }
 
 .ms-tile-img {
-  width: 100% !important;
-  height: 100% !important;
+  /* Smaller display box inside the card for every product */
+  inset: 18% 16% !important;
+  width: auto !important;
+  height: auto !important;
   max-width: none;
   object-fit: contain;
   object-position: center;
@@ -670,7 +670,21 @@ select:disabled {
 }
 
 .ms-tile:hover .ms-tile-img {
-  transform: scale(calc(var(--fit-scale, 1) * 1.03));
+  transform: scale(calc(var(--fit-scale, 1) * 1.02));
+}
+
+/* Listing ProductCard media */
+.ms-card-media {
+  position: relative;
+  aspect-ratio: 4 / 5;
+  background: #fbfbfd;
+  overflow: hidden;
+}
+
+.ms-card-media .ms-smart-fit {
+  inset: 18% 16% !important;
+  width: auto !important;
+  height: auto !important;
 }
 
 /* ProductCard / generic smart-fit images */
@@ -680,7 +694,7 @@ select:disabled {
 }
 
 .group:hover .ms-smart-fit {
-  transform: scale(calc(var(--fit-scale, 1) * 1.03));
+  transform: scale(calc(var(--fit-scale, 1) * 1.02));
 }
 
 .ms-tile-badges {

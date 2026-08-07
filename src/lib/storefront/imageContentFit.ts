@@ -11,12 +11,13 @@ export type ContentFit = {
 const DEFAULT_FIT: ContentFit = { scale: 1, originX: 0.5, originY: 0.5 };
 const cache = new Map<string, ContentFit>();
 
-/** Subject should occupy roughly this fraction of the canvas (max axis). */
-const TARGET_FILL = 0.78;
-/** Already-big enough — don't touch. */
-const SKIP_IF_FILL_ABOVE = 0.7;
-/** Cap zoom so we never crop aggressively. */
-const MAX_SCALE = 1.32;
+/** Subject should occupy a modest share of the source — not wall-to-wall. */
+const TARGET_FILL = 0.56;
+/** Already full enough in the source — never enlarge. */
+const SKIP_IF_FILL_ABOVE = 0.5;
+/** Gentle lift only for sparse shots (e.g. OnePlus with huge margins). */
+const MAX_SCALE = 1.2;
+const CACHE_VERSION = "v3";
 
 function isBackgroundPixel(r: number, g: number, b: number, a: number) {
   if (a < 12) return true;
@@ -78,7 +79,7 @@ export function measureProductImageFit(src: string): Promise<ContentFit> {
   if (!src || src.includes("placehold.co")) {
     return Promise.resolve(DEFAULT_FIT);
   }
-  const cached = cache.get(src);
+  const cached = cache.get(`${CACHE_VERSION}:${src}`);
   if (cached) return Promise.resolve(cached);
 
   return new Promise((resolve) => {
@@ -86,7 +87,7 @@ export function measureProductImageFit(src: string): Promise<ContentFit> {
     img.decoding = "async";
 
     const finish = (fit: ContentFit) => {
-      cache.set(src, fit);
+      cache.set(`${CACHE_VERSION}:${src}`, fit);
       resolve(fit);
     };
 

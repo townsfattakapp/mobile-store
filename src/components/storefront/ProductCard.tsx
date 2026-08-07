@@ -44,7 +44,7 @@ export function ProductCard({ product, priority = false, prefetch = true }: Prod
         prefetch={prefetch}
         className="flex flex-col flex-1 min-h-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b2f7c] focus-visible:ring-offset-2 rounded-[28px]"
       >
-        <div className="relative w-full aspect-[4/5] px-[18px] py-4 bg-[#fbfbfd] overflow-hidden">
+        <div className="ms-card-media w-full">
           <ProductImage
             src={image}
             alt={product.name}
@@ -52,7 +52,7 @@ export function ProductCard({ product, priority = false, prefetch = true }: Prod
             fill
             smartFit
             sizes="(max-width: 640px) 85vw, (max-width: 1024px) 45vw, 280px"
-            className="object-contain object-center !w-full !h-full drop-shadow-lg mix-blend-multiply transition-transform duration-700 ease-out"
+            className="object-contain object-center drop-shadow-lg mix-blend-multiply transition-transform duration-700 ease-out"
           />
         </div>
 
