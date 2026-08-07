@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/utils/supabase/server";
+import { createAdminClient } from "@/utils/supabase/admin";
 
 export async function placeOrder(formData: any, cartItems: any[], subtotal: number) {
   const supabase = await createClient();
@@ -10,7 +11,7 @@ export async function placeOrder(formData: any, cartItems: any[], subtotal: numb
       return { error: "Your cart is empty." };
     }
 
-    // 1. Verify stock
+    // 1. Verify stock (public/read RLS)
     for (const item of cartItems) {
       if (item.variantId) {
         const { data: v } = await supabase
@@ -33,14 +34,16 @@ export async function placeOrder(formData: any, cartItems: any[], subtotal: numb
       }
     }
 
-    // 2. Resolve customer — orders.user_id FK → profiles.id (not auth.users alone)
+    // Service role: create/link profile + insert order (avoids profiles RLS + FK issues)
+    const admin = createAdminClient();
+
     const {
       data: { user },
     } = await supabase.auth.getUser();
 
     let userId: string | null = null;
     if (user?.id) {
-      const { data: existing } = await supabase
+      const { data: existing } = await admin
         .from("profiles")
         .select("id")
         .eq("id", user.id)
@@ -49,17 +52,14 @@ export async function placeOrder(formData: any, cartItems: any[], subtotal: numb
       if (existing?.id) {
         userId = existing.id;
       } else {
-        // Auth user without profile (common after signup without trigger) — create then link
         const fullName =
           String(formData.get("fullName") || "").trim() ||
           (user.user_metadata?.full_name as string | undefined) ||
           null;
         const phone =
-          String(formData.get("phone") || "").trim() ||
-          (user.phone as string | undefined) ||
-          null;
+          String(formData.get("phone") || "").trim() || user.phone || null;
 
-        const { data: created, error: profileErr } = await supabase
+        const { data: created, error: profileErr } = await admin
           .from("profiles")
           .upsert(
             {
@@ -76,14 +76,10 @@ export async function placeOrder(formData: any, cartItems: any[], subtotal: numb
             { onConflict: "id" }
           )
           .select("id")
-          .maybeSingle();
+          .single();
 
-        if (profileErr || !created?.id) {
-          // Still allow checkout as guest rather than failing the sale
-          console.warn(
-            "Could not create profile for order; continuing as guest:",
-            profileErr?.message
-          );
+        if (profileErr) {
+          console.warn("Profile upsert failed; guest order:", profileErr.message);
           userId = null;
         } else {
           userId = created.id;
@@ -121,7 +117,7 @@ export async function placeOrder(formData: any, cartItems: any[], subtotal: numb
       notes: paymentMethod === "online" ? "Awaiting online payment" : null,
     };
 
-    const { data: order, error: orderErr } = await supabase
+    const { data: order, error: orderErr } = await admin
       .from("orders")
       .insert(orderPayload)
       .select("id, order_number")
@@ -129,11 +125,10 @@ export async function placeOrder(formData: any, cartItems: any[], subtotal: numb
 
     if (orderErr) throw new Error("Failed to create order: " + orderErr.message);
 
-    // 3. Line items + stock
     for (const item of cartItems) {
       let taxRate = 18;
       if (item.productId) {
-        const { data: prod } = await supabase
+        const { data: prod } = await admin
           .from("products")
           .select("tax_rate")
           .eq("id", item.productId)
@@ -141,12 +136,12 @@ export async function placeOrder(formData: any, cartItems: any[], subtotal: numb
         if (prod?.tax_rate != null) taxRate = Number(prod.tax_rate);
       }
 
-      const { error: itemErr } = await supabase.from("order_items").insert({
+      const { error: itemErr } = await admin.from("order_items").insert({
         order_id: order.id,
         product_id: item.productId,
-        variant_id: item.variantId,
+        variant_id: item.variantId || null,
         product_name: item.name,
-        variant_name: item.variantName,
+        variant_name: item.variantName || null,
         sku: item.sku,
         quantity: item.quantity,
         unit_price: item.price,
@@ -154,43 +149,42 @@ export async function placeOrder(formData: any, cartItems: any[], subtotal: numb
         total_price: item.price * item.quantity,
       });
       if (itemErr) {
-        console.error("order_items insert:", itemErr.message);
         throw new Error("Failed to save order items: " + itemErr.message);
       }
 
       if (item.variantId) {
-        const { data: v } = await supabase
+        const { data: v } = await admin
           .from("product_variants")
           .select("stock_quantity, product_id")
           .eq("id", item.variantId)
           .single();
         if (v) {
-          await supabase
+          await admin
             .from("product_variants")
-            .update({ stock_quantity: v.stock_quantity - item.quantity })
+            .update({ stock_quantity: Math.max(0, v.stock_quantity - item.quantity) })
             .eq("id", item.variantId);
-          const { data: p } = await supabase
+          const { data: p } = await admin
             .from("products")
             .select("stock_quantity")
             .eq("id", v.product_id)
             .single();
           if (p) {
-            await supabase
+            await admin
               .from("products")
-              .update({ stock_quantity: p.stock_quantity - item.quantity })
+              .update({ stock_quantity: Math.max(0, p.stock_quantity - item.quantity) })
               .eq("id", v.product_id);
           }
         }
       } else {
-        const { data: p } = await supabase
+        const { data: p } = await admin
           .from("products")
           .select("stock_quantity")
           .eq("id", item.productId)
           .single();
         if (p) {
-          await supabase
+          await admin
             .from("products")
-            .update({ stock_quantity: p.stock_quantity - item.quantity })
+            .update({ stock_quantity: Math.max(0, p.stock_quantity - item.quantity) })
             .eq("id", item.productId);
         }
       }
