@@ -1,4 +1,11 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
+import {
+  measureProductImageFit,
+  type ContentFit,
+} from "@/lib/storefront/imageContentFit";
 
 const PLACEHOLDER =
   "https://placehold.co/480x560/f7f3ec/8a8496?text=Mahadev+Mobiles";
@@ -15,8 +22,11 @@ function canOptimize(src: string) {
   }
 }
 
+const NO_FIT: ContentFit = { scale: 1, originX: 0.5, originY: 0.5 };
+
 /**
- * Optimized product photo — eager/high priority for above-the-fold tiles.
+ * Optimized product photo.
+ * When `smartFit` is on, only sparse (small-looking) subjects get a gentle zoom.
  */
 export function ProductImage({
   src,
@@ -27,6 +37,7 @@ export function ProductImage({
   width = 480,
   height = 560,
   fill = false,
+  smartFit = false,
 }: {
   src?: string | null;
   alt: string;
@@ -36,9 +47,34 @@ export function ProductImage({
   width?: number;
   height?: number;
   fill?: boolean;
+  /** Analyze whitespace and zoom only undersized product subjects */
+  smartFit?: boolean;
 }) {
   const url = (src && src.trim()) || PLACEHOLDER;
   const unoptimized = !canOptimize(url);
+  const [fit, setFit] = useState<ContentFit>(NO_FIT);
+
+  useEffect(() => {
+    if (!smartFit) {
+      setFit(NO_FIT);
+      return;
+    }
+    let alive = true;
+    measureProductImageFit(url).then((next) => {
+      if (alive) setFit(next);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [url, smartFit]);
+
+  const style = useMemo(() => {
+    if (!smartFit) return undefined;
+    return {
+      ["--fit-scale" as string]: String(fit.scale),
+      transformOrigin: `${fit.originX * 100}% ${fit.originY * 100}%`,
+    } as React.CSSProperties;
+  }, [smartFit, fit]);
 
   const shared = {
     src: url,
@@ -48,7 +84,8 @@ export function ProductImage({
     fetchPriority: (priority ? "high" : "auto") as "high" | "auto",
     loading: (priority ? "eager" : "lazy") as "eager" | "lazy",
     quality: 78,
-    className,
+    className: smartFit ? `${className || ""} ms-smart-fit`.trim() : className,
+    style,
     unoptimized,
   };
 

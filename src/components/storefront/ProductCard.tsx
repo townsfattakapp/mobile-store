@@ -50,8 +50,9 @@ export function ProductCard({ product, priority = false, prefetch = true }: Prod
             alt={product.name}
             priority={priority}
             fill
+            smartFit
             sizes="(max-width: 640px) 85vw, (max-width: 1024px) 45vw, 280px"
-            className="object-contain object-center !w-full !h-full group-hover:scale-[1.03] transition-transform duration-700 ease-out drop-shadow-lg mix-blend-multiply"
+            className="object-contain object-center !w-full !h-full drop-shadow-lg mix-blend-multiply transition-transform duration-700 ease-out"
           />
         </div>
 

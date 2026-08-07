@@ -51,6 +51,7 @@ export function HomeProductTile({ product, priority = false, tone = "light" }: P
             alt={name}
             priority={priority}
             fill
+            smartFit
             sizes="(max-width: 768px) 70vw, 280px"
             className="ms-tile-img"
           />
