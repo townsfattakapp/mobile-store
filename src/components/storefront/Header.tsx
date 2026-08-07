@@ -70,30 +70,44 @@ export function Header() {
     }
 
     setIsSearching(true);
+    const controller = new AbortController();
     const timer = setTimeout(async () => {
-      const supabase = createClient();
-      const { data, error } = await supabase
-        .from("products")
-        .select("id, name, slug, type, selling_price, main_image_url, brand:brands(name)")
-        .eq("status", "active")
-        .ilike("name", `%${trimmed}%`)
-        .limit(8);
+      try {
+        const supabase = createClient();
+        const { data, error } = await supabase
+          .from("products")
+          .select("id, name, slug, type, selling_price, main_image_url, brand:brands(name)")
+          .eq("status", "active")
+          .ilike("name", `%${trimmed}%`)
+          .limit(8)
+          .abortSignal(controller.signal);
 
-      if (error) {
-        console.error("Search error:", error);
+        if (controller.signal.aborted) return;
+
+        if (error) {
+          console.error("Search error:", error);
+          setResults([]);
+        } else {
+          setResults(
+            (data as unknown as SearchResult[])?.map((row: any) => ({
+              ...row,
+              brand: Array.isArray(row.brand) ? row.brand[0] ?? null : row.brand,
+            })) || []
+          );
+        }
+      } catch (err: any) {
+        if (err?.name === "AbortError") return;
+        console.error("Search error:", err);
         setResults([]);
-      } else {
-        setResults(
-          (data as unknown as SearchResult[])?.map((row: any) => ({
-            ...row,
-            brand: Array.isArray(row.brand) ? row.brand[0] ?? null : row.brand,
-          })) || []
-        );
+      } finally {
+        if (!controller.signal.aborted) setIsSearching(false);
       }
-      setIsSearching(false);
-    }, 300);
+    }, 280);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
   }, [query, isSearchOpen]);
 
   useEffect(() => {

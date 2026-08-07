@@ -1,27 +1,27 @@
+import React from "react";
+import Link from "next/link";
 import { createClient } from "@/utils/supabase/server";
 import { ProductCard } from "@/components/storefront/ProductCard";
 import { PlpToolbar } from "@/components/storefront/PlpToolbar";
+import { PLP_PAGE_SIZE, PRODUCT_CARD_SELECT } from "@/lib/storefront/productQueries";
 
 export const revalidate = 60;
 
 export default async function UsedMobilesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ sort?: string }>;
+  searchParams: Promise<{ sort?: string; page?: string }>;
 }) {
-  const { sort: sortFilter } = await searchParams;
+  const { sort: sortFilter, page: pageRaw } = await searchParams;
+  const page = Math.max(1, Number(pageRaw) || 1);
+  const from = (page - 1) * PLP_PAGE_SIZE;
+  const to = from + PLP_PAGE_SIZE - 1;
+
   const supabase = await createClient();
 
   let query = supabase
     .from("products")
-    .select(
-      `
-      *,
-      brand:brands(name),
-      master_devices(specifications),
-      variants:product_variants(*)
-    `
-    )
+    .select(PRODUCT_CARD_SELECT, { count: "exact" })
     .eq("type", "used_mobile")
     .eq("status", "active");
 
@@ -33,7 +33,16 @@ export default async function UsedMobilesPage({
     query = query.order("created_at", { ascending: false });
   }
 
-  const { data: products } = await query;
+  const { data: products, count } = await query.range(from, to);
+  const totalPages = Math.max(1, Math.ceil((count || 0) / PLP_PAGE_SIZE));
+
+  function pageHref(p: number) {
+    const params = new URLSearchParams();
+    if (sortFilter) params.set("sort", sortFilter);
+    if (p > 1) params.set("page", String(p));
+    const q = params.toString();
+    return q ? `/used-mobiles?${q}` : "/used-mobiles";
+  }
 
   return (
     <div className="ms-plp min-h-screen bg-white">
@@ -55,11 +64,39 @@ export default async function UsedMobilesPage({
 
       <div className="ms-plp-grid-wrap">
         {products && products.length > 0 ? (
-          <div className="ms-plp-grid">
-            {products.map((product, i) => (
-              <ProductCard key={product.id} product={product} priority={i < 4} />
-            ))}
-          </div>
+          <>
+            <div className="ms-plp-grid">
+              {products.map((product, i) => (
+                <ProductCard
+                  key={product.id}
+                  product={product}
+                  priority={i < 4 && page === 1}
+                  prefetch={i < 12}
+                />
+              ))}
+            </div>
+            {totalPages > 1 && (
+              <nav className="ms-plp-pager" aria-label="Pagination">
+                {page > 1 ? (
+                  <Link href={pageHref(page - 1)} className="ms-plp-pager-link" prefetch>
+                    Previous
+                  </Link>
+                ) : (
+                  <span className="ms-plp-pager-link is-disabled">Previous</span>
+                )}
+                <span className="ms-plp-pager-status">
+                  Page {page} of {totalPages}
+                </span>
+                {page < totalPages ? (
+                  <Link href={pageHref(page + 1)} className="ms-plp-pager-link" prefetch>
+                    Next
+                  </Link>
+                ) : (
+                  <span className="ms-plp-pager-link is-disabled">Next</span>
+                )}
+              </nav>
+            )}
+          </>
         ) : (
           <div className="ms-plp-empty">
             <h3>No pre-owned mobiles available</h3>

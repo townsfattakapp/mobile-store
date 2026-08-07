@@ -13,12 +13,26 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
   const { data: product, error } = await supabase
     .from("products")
     .select(`
-      *,
+      id,
+      name,
+      slug,
+      type,
+      status,
+      sku,
+      selling_price,
+      mrp,
+      stock_quantity,
+      main_image_url,
+      short_description,
+      full_description,
+      tax_rate,
       brand:brands(name),
       master_devices(specifications, model_name, release_year),
-      variants:product_variants(*),
-      product_images(*),
-      used_device_inspections(*)
+      variants:product_variants(
+        id, name, sku, mrp, selling_price, stock_quantity, attributes, image_url, status
+      ),
+      product_images(id, url, alt_text, sort_order),
+      used_device_inspections(id, condition_grade, battery_health, notes, inspected_at)
     `)
     .eq("slug", slug)
     .single();
@@ -28,6 +42,17 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
     notFound();
   }
 
+  // Normalize relation shapes from Supabase (object vs array typings)
+  const pageProduct: any = {
+    ...product,
+    brand: Array.isArray((product as any).brand)
+      ? (product as any).brand[0] ?? null
+      : (product as any).brand,
+    master_devices: Array.isArray((product as any).master_devices)
+      ? (product as any).master_devices[0] ?? null
+      : (product as any).master_devices,
+  };
+
   return (
     <div className="bg-gray-50 min-h-screen pb-20">
       <div className="container mx-auto px-4 py-8">
@@ -35,23 +60,23 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
         <div className="text-sm text-gray-500 mb-8 flex items-center gap-2">
           <span>Home</span>
           <span>/</span>
-          <span className="capitalize">{product.type.replace('_', ' ')}s</span>
+          <span className="capitalize">{pageProduct.type.replace('_', ' ')}s</span>
           <span>/</span>
-          <span className="font-medium text-black">{product.name}</span>
+          <span className="font-medium text-black">{pageProduct.name}</span>
         </div>
 
-        <ProductClient initialProduct={product} />
+        <ProductClient initialProduct={pageProduct} />
         
         {/* Specifications Section */}
-        {product.master_devices?.specifications && Object.keys(product.master_devices.specifications).length > 0 && (
+        {pageProduct.master_devices?.specifications && Object.keys(pageProduct.master_devices.specifications).length > 0 && (
           <div className="mt-16 bg-white p-8 rounded-2xl border max-w-4xl">
             <h2 className="text-2xl font-bold mb-6">Technical Specifications</h2>
 
             {/* Prefer structured Samsung/API sections when available */}
-            {Array.isArray(product.master_devices.specifications.spec_sections) &&
-            product.master_devices.specifications.spec_sections.length > 0 ? (
+            {Array.isArray(pageProduct.master_devices.specifications.spec_sections) &&
+            pageProduct.master_devices.specifications.spec_sections.length > 0 ? (
               <div className="space-y-8">
-                {product.master_devices.specifications.spec_sections.map(
+                {pageProduct.master_devices.specifications.spec_sections.map(
                   (section: { title: string; items: { name: string; value: string }[] }) => (
                     <div key={section.title}>
                       <h3 className="text-lg font-semibold text-[#1d1d1f] mb-3">
@@ -76,10 +101,10 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                   )
                 )}
               </div>
-            ) : Object.keys(product.master_devices.specifications.tech_specs || {}).length > 0 ? (
+            ) : Object.keys(pageProduct.master_devices.specifications.tech_specs || {}).length > 0 ? (
               <div className="divide-y border rounded-xl overflow-hidden">
                 {Object.entries(
-                  product.master_devices.specifications.tech_specs as Record<string, string>
+                  pageProduct.master_devices.specifications.tech_specs as Record<string, string>
                 ).map(([key, value]) => (
                   <div key={key} className="py-3 px-4 flex flex-col sm:flex-row sm:gap-8">
                     <div className="sm:w-2/5 text-sm font-medium text-[#1d1d1f]">{key}</div>
@@ -91,7 +116,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
               </div>
             ) : (
               <div className="divide-y">
-                {Object.entries(product.master_devices.specifications)
+                {Object.entries(pageProduct.master_devices.specifications)
                   .filter(([key, value]) => {
                     if (
                       [
@@ -135,11 +160,11 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
               </div>
             )}
 
-            {product.master_devices.specifications.description && (
+            {pageProduct.master_devices.specifications.description && (
               <div className="mt-8 pt-8 border-t">
                 <h3 className="text-lg font-bold mb-4">Description</h3>
                 <p className="text-gray-600 leading-relaxed">
-                  {product.master_devices.specifications.description}
+                  {pageProduct.master_devices.specifications.description}
                 </p>
               </div>
             )}

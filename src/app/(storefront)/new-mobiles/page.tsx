@@ -1,28 +1,67 @@
 import React from "react";
+import Link from "next/link";
 import { createClient } from "@/utils/supabase/server";
 import { ProductCard } from "@/components/storefront/ProductCard";
 import { PlpToolbar } from "@/components/storefront/PlpToolbar";
+import {
+  PLP_PAGE_SIZE,
+  PRODUCT_CARD_SELECT_INNER_BRAND,
+} from "@/lib/storefront/productQueries";
 
 export const revalidate = 60;
 
 export default async function NewMobilesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ brand?: string; sort?: string; min?: string; max?: string }>;
+  searchParams: Promise<{ brand?: string; sort?: string; min?: string; max?: string; page?: string }>;
 }) {
   const resolvedParams = await searchParams;
   const brandFilter = resolvedParams.brand?.trim().toLowerCase() || "";
   const sortFilter = resolvedParams.sort;
   const minPrice = resolvedParams.min ? Number(resolvedParams.min) : null;
   const maxPrice = resolvedParams.max ? Number(resolvedParams.max) : null;
+  const page = Math.max(1, Number(resolvedParams.page) || 1);
+  const from = (page - 1) * PLP_PAGE_SIZE;
+  const to = from + PLP_PAGE_SIZE - 1;
 
   const supabase = await createClient();
 
-  const { data: brandRows } = await supabase
+  let productQuery = supabase
+    .from("products")
+    .select(PRODUCT_CARD_SELECT_INNER_BRAND, { count: "exact" })
+    .eq("type", "new_mobile")
+    .eq("status", "active");
+
+  if (brandFilter) {
+    productQuery = productQuery.ilike("brands.name", `%${brandFilter}%`);
+  }
+  if (minPrice != null && !Number.isNaN(minPrice)) {
+    productQuery = productQuery.gte("selling_price", minPrice);
+  }
+  if (maxPrice != null && !Number.isNaN(maxPrice)) {
+    productQuery = productQuery.lte("selling_price", maxPrice);
+  }
+
+  if (sortFilter === "price_asc") {
+    productQuery = productQuery.order("selling_price", { ascending: true });
+  } else if (sortFilter === "price_desc") {
+    productQuery = productQuery.order("selling_price", { ascending: false });
+  } else {
+    productQuery = productQuery.order("created_at", { ascending: false });
+  }
+
+  productQuery = productQuery.range(from, to);
+
+  const brandsQuery = supabase
     .from("products")
     .select("brand:brands!inner(name)")
     .eq("type", "new_mobile")
     .eq("status", "active");
+
+  const [{ data: brandRows }, { data: products, count }] = await Promise.all([
+    brandsQuery,
+    productQuery,
+  ]);
 
   const brandNames = Array.from(
     new Set(
@@ -32,39 +71,7 @@ export default async function NewMobilesPage({
     )
   ).sort((a, b) => a.localeCompare(b));
 
-  let query = supabase
-    .from("products")
-    .select(
-      `
-      *,
-      brand:brands!inner(name),
-      master_devices(specifications),
-      variants:product_variants(*)
-    `
-    )
-    .eq("type", "new_mobile")
-    .eq("status", "active");
-
-  if (brandFilter) {
-    query = query.ilike("brands.name", `%${brandFilter}%`);
-  }
-
-  if (minPrice != null && !Number.isNaN(minPrice)) {
-    query = query.gte("selling_price", minPrice);
-  }
-  if (maxPrice != null && !Number.isNaN(maxPrice)) {
-    query = query.lte("selling_price", maxPrice);
-  }
-
-  if (sortFilter === "price_asc") {
-    query = query.order("selling_price", { ascending: true });
-  } else if (sortFilter === "price_desc") {
-    query = query.order("selling_price", { ascending: false });
-  } else {
-    query = query.order("created_at", { ascending: false });
-  }
-
-  const { data: products } = await query;
+  const totalPages = Math.max(1, Math.ceil((count || 0) / PLP_PAGE_SIZE));
 
   const chips = [
     {
@@ -80,10 +87,19 @@ export default async function NewMobilesPage({
       return {
         label: name,
         href: `/new-mobiles?${params.toString()}`,
-        active: brandFilter === slug || brandFilter === name.toLowerCase(),
+        active: brandFilter === slug,
       };
     }),
   ];
+
+  function pageHref(p: number) {
+    const params = new URLSearchParams();
+    if (brandFilter) params.set("brand", brandFilter);
+    if (sortFilter) params.set("sort", sortFilter);
+    if (p > 1) params.set("page", String(p));
+    const q = params.toString();
+    return q ? `/new-mobiles?${q}` : "/new-mobiles";
+  }
 
   return (
     <div className="ms-plp min-h-screen bg-white">
@@ -108,11 +124,39 @@ export default async function NewMobilesPage({
 
       <div className="ms-plp-grid-wrap">
         {products && products.length > 0 ? (
-          <div className="ms-plp-grid">
-            {products.map((product, i) => (
-              <ProductCard key={product.id} product={product} priority={i < 4} />
-            ))}
-          </div>
+          <>
+            <div className="ms-plp-grid">
+              {products.map((product, i) => (
+                <ProductCard
+                  key={product.id}
+                  product={product}
+                  priority={i < 4 && page === 1}
+                  prefetch={i < 12}
+                />
+              ))}
+            </div>
+            {totalPages > 1 && (
+              <nav className="ms-plp-pager" aria-label="Pagination">
+                {page > 1 ? (
+                  <Link href={pageHref(page - 1)} className="ms-plp-pager-link" prefetch>
+                    Previous
+                  </Link>
+                ) : (
+                  <span className="ms-plp-pager-link is-disabled">Previous</span>
+                )}
+                <span className="ms-plp-pager-status">
+                  Page {page} of {totalPages}
+                </span>
+                {page < totalPages ? (
+                  <Link href={pageHref(page + 1)} className="ms-plp-pager-link" prefetch>
+                    Next
+                  </Link>
+                ) : (
+                  <span className="ms-plp-pager-link is-disabled">Next</span>
+                )}
+              </nav>
+            )}
+          </>
         ) : (
           <div className="ms-plp-empty">
             <h3>No products available</h3>

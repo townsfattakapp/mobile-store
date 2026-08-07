@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { startTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronDown } from "lucide-react";
@@ -13,11 +13,9 @@ export type PlpChip = {
 
 type Props = {
   chips: PlpChip[];
-  /** Base path for sort changes, e.g. /new-mobiles */
   basePath: string;
   brandParam?: string | null;
   sortParam?: string | null;
-  /** Hide sort control (static placeholder pages) */
   showSort?: boolean;
 };
 
@@ -47,6 +45,8 @@ export function PlpToolbar({
             <Link
               key={chip.href + chip.label}
               href={chip.href}
+              prefetch
+              scroll={false}
               className={`ms-plp-chip${chip.active ? " is-active" : ""}`}
               aria-current={chip.active ? "page" : undefined}
             >
@@ -67,7 +67,9 @@ export function PlpToolbar({
                 value={sortValue}
                 onChange={(e) => {
                   const next = e.target.value || null;
-                  router.push(buildHref(basePath, brandParam, next));
+                  startTransition(() => {
+                    router.push(buildHref(basePath, brandParam, next), { scroll: false });
+                  });
                 }}
               >
                 <option value="">Featured</option>
