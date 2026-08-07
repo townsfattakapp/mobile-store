@@ -4,31 +4,15 @@ import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/Button";
 import {
   ORDER_STATUSES,
+  ORDER_STATUS_LABEL,
   PAYMENT_STATUSES,
+  PAYMENT_STATUS_LABEL,
+} from "./orderStatus";
+import {
   updateOrderNotesAction,
   updateOrderStatusAction,
   updatePaymentStatusAction,
 } from "./actions";
-
-const STATUS_LABEL: Record<string, string> = {
-  pending: "Pending",
-  confirmed: "Confirmed",
-  processing: "Processing",
-  ready_for_pickup: "Ready for pickup",
-  shipped: "Shipped",
-  out_for_delivery: "Out for delivery",
-  delivered: "Delivered",
-  cancelled: "Cancelled",
-  returned: "Returned",
-  refunded: "Refunded",
-};
-
-const PAYMENT_LABEL: Record<string, string> = {
-  pending: "Pending",
-  paid: "Paid",
-  failed: "Failed",
-  refunded: "Refunded",
-};
 
 export function OrderStatusPanel({
   orderId,
@@ -66,7 +50,7 @@ export function OrderStatusPanel({
         <p className="mb-4 text-xs text-gray-500">
           Current:{" "}
           <span className="font-medium text-gray-800">
-            {STATUS_LABEL[status] || status}
+            {ORDER_STATUS_LABEL[status as keyof typeof ORDER_STATUS_LABEL] || status}
           </span>
         </p>
         <div className="flex flex-wrap gap-2">
@@ -78,10 +62,13 @@ export function OrderStatusPanel({
               variant={status === s ? "primary" : "outline"}
               disabled={pending || status === s}
               onClick={() =>
-                run(() => updateOrderStatusAction(orderId, s), `Status set to ${STATUS_LABEL[s]}`)
+                run(
+                  () => updateOrderStatusAction(orderId, s),
+                  `Status set to ${ORDER_STATUS_LABEL[s]}`
+                )
               }
             >
-              {STATUS_LABEL[s]}
+              {ORDER_STATUS_LABEL[s]}
             </Button>
           ))}
         </div>
@@ -92,7 +79,8 @@ export function OrderStatusPanel({
         <p className="mb-4 text-xs text-gray-500">
           Current:{" "}
           <span className="font-medium text-gray-800">
-            {PAYMENT_LABEL[paymentStatus] || paymentStatus}
+            {PAYMENT_STATUS_LABEL[paymentStatus as keyof typeof PAYMENT_STATUS_LABEL] ||
+              paymentStatus}
           </span>
         </p>
         <div className="flex flex-wrap gap-2">
@@ -106,11 +94,11 @@ export function OrderStatusPanel({
               onClick={() =>
                 run(
                   () => updatePaymentStatusAction(orderId, s),
-                  `Payment marked ${PAYMENT_LABEL[s].toLowerCase()}`
+                  `Payment marked ${PAYMENT_STATUS_LABEL[s].toLowerCase()}`
                 )
               }
             >
-              {PAYMENT_LABEL[s]}
+              {PAYMENT_STATUS_LABEL[s]}
             </Button>
           ))}
         </div>

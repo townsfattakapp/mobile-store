@@ -2,24 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/utils/supabase/server";
-
-export const ORDER_STATUSES = [
-  "pending",
-  "confirmed",
-  "processing",
-  "ready_for_pickup",
-  "shipped",
-  "out_for_delivery",
-  "delivered",
-  "cancelled",
-  "returned",
-  "refunded",
-] as const;
-
-export const PAYMENT_STATUSES = ["pending", "paid", "failed", "refunded"] as const;
-
-export type OrderStatus = (typeof ORDER_STATUSES)[number];
-export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
+import {
+  ORDER_STATUSES,
+  PAYMENT_STATUSES,
+  type OrderStatus,
+  type PaymentStatus,
+} from "./orderStatus";
 
 async function requireStaff() {
   const supabase = await createClient();
@@ -48,12 +36,16 @@ async function appendHistory(
   notes: string,
   createdBy: string
 ) {
-  await supabase.from("order_status_history").insert({
+  const { error } = await supabase.from("order_status_history").insert({
     order_id: orderId,
     status: orderStatus,
     notes,
     created_by: createdBy,
   });
+  // History is best-effort — don't fail the status update if insert is blocked
+  if (error) {
+    console.error("order_status_history insert failed:", error.message);
+  }
 }
 
 export async function updateOrderStatusAction(orderId: string, status: string) {

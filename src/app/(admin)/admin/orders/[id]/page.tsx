@@ -6,23 +6,11 @@ import { Button } from "@/components/ui/Button";
 import { normalizeAddress } from "@/lib/invoice/types";
 import { normalizePhoneKey } from "@/lib/customers/phone";
 import { OrderStatusPanel } from "./OrderStatusPanel";
+import { ORDER_STATUS_LABEL } from "./orderStatus";
 
 export const dynamic = "force-dynamic";
 
 type Props = { params: Promise<{ id: string }> };
-
-const STATUS_LABEL: Record<string, string> = {
-  pending: "Pending",
-  confirmed: "Confirmed",
-  processing: "Processing",
-  ready_for_pickup: "Ready for pickup",
-  shipped: "Shipped",
-  out_for_delivery: "Out for delivery",
-  delivered: "Delivered",
-  cancelled: "Cancelled",
-  returned: "Returned",
-  refunded: "Refunded",
-};
 
 function money(n: unknown) {
   return `₹${Number(n || 0).toLocaleString("en-IN")}`;
@@ -128,7 +116,7 @@ export default async function OrderDetailPage({ params }: Props) {
 
   if (!order) notFound();
 
-  const [{ data: history }, { data: invoice }] = await Promise.all([
+  const [historyRes, invoiceRes] = await Promise.all([
     supabase
       .from("order_status_history")
       .select("id, status, notes, created_at, created_by")
@@ -139,8 +127,12 @@ export default async function OrderDetailPage({ params }: Props) {
       .from("invoices")
       .select("id, invoice_number")
       .eq("order_id", id)
-      .maybeSingle(),
+      .order("created_at", { ascending: false })
+      .limit(1),
   ]);
+
+  const history = historyRes.data || [];
+  const invoice = invoiceRes.data?.[0] || null;
 
   const addr = normalizeAddress(order.address_snapshot);
   const items = Array.isArray(order.order_items) ? order.order_items : [];
@@ -161,7 +153,8 @@ export default async function OrderDetailPage({ params }: Props) {
               <span
                 className={`rounded-md border px-2.5 py-0.5 text-xs font-semibold ${statusBadgeClass(order.status)}`}
               >
-                {STATUS_LABEL[order.status] || order.status}
+                {ORDER_STATUS_LABEL[order.status as keyof typeof ORDER_STATUS_LABEL] ||
+                  order.status}
               </span>
             </div>
             <p className="mt-1 text-sm text-gray-500">
@@ -270,14 +263,15 @@ export default async function OrderDetailPage({ params }: Props) {
 
           <div className="rounded-xl border bg-white p-6 shadow-sm">
             <h3 className="mb-4 font-semibold">Status history</h3>
-            {!history?.length ? (
+            {!history.length ? (
               <p className="text-sm text-gray-500">No status changes recorded yet.</p>
             ) : (
               <ol className="space-y-3">
                 {history.map((row) => (
                   <li key={row.id} className="border-l-2 border-gray-200 pl-3">
                     <p className="text-sm font-medium text-gray-900">
-                      {STATUS_LABEL[row.status] || row.status}
+                      {ORDER_STATUS_LABEL[row.status as keyof typeof ORDER_STATUS_LABEL] ||
+                        row.status}
                     </p>
                     {row.notes ? <p className="text-xs text-gray-600">{row.notes}</p> : null}
                     <p className="mt-0.5 text-xs text-gray-400">
