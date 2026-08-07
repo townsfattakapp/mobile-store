@@ -37,6 +37,14 @@ export default function CheckoutPage() {
     setMounted(true);
   }, []);
 
+  // Always land at top when opening checkout (soft nav can preserve scroll)
+  useEffect(() => {
+    if (!mounted) return;
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }, [mounted]);
+
   if (!mounted) return null;
 
   if (items.length === 0) {
