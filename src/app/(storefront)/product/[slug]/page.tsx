@@ -32,10 +32,27 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
         id, name, sku, mrp, selling_price, stock_quantity, attributes, image_url, status
       ),
       product_images(id, url, alt_text, sort_order),
-      used_device_inspections(id, condition_grade, battery_health, notes, inspected_at)
+      used_device_inspections(
+        product_id,
+        display_tested,
+        touch_tested,
+        camera_tested,
+        speaker_tested,
+        microphone_tested,
+        wifi_tested,
+        bluetooth_tested,
+        charging_tested,
+        battery_tested,
+        fingerprint_tested,
+        face_id_tested,
+        sim_tested,
+        buttons_tested,
+        quality_checked_badge,
+        inspected_at
+      )
     `)
     .eq("slug", slug)
-    .single();
+    .maybeSingle();
 
   if (error || !product) {
     console.error("Product fetch error:", error);
