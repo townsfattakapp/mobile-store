@@ -57,8 +57,8 @@ export default async function SparePartsPage({
       <div className="ms-plp-grid-wrap">
         {products && products.length > 0 ? (
           <div className="ms-plp-grid">
-            {products.map((product) => (
-              <ProductCard key={product.id} product={product} />
+            {products.map((product, i) => (
+              <ProductCard key={product.id} product={product} priority={i < 4} />
             ))}
           </div>
         ) : (

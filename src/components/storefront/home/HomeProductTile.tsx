@@ -6,6 +6,7 @@ import {
   discountPercent,
   formatINR,
 } from "@/lib/storefront/format";
+import { ProductImage } from "@/components/storefront/ProductImage";
 
 export type HomeProduct = {
   id: string;
@@ -45,15 +46,13 @@ export function HomeProductTile({ product, priority = false, tone = "light" }: P
               {pct > 0 && <span className="ms-badge ms-badge--accent">Save {pct}%</span>}
             </div>
           )}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={
-              product.main_image_url ||
-              "https://placehold.co/480x560/f3efe8/8a8496?text=MobiStore"
-            }
+          <ProductImage
+            src={product.main_image_url}
             alt={name}
-            loading={priority ? "eager" : "lazy"}
-            decoding="async"
+            priority={priority}
+            width={480}
+            height={560}
+            sizes="(max-width: 768px) 70vw, 280px"
             className="ms-tile-img"
           />
         </div>
@@ -63,13 +62,9 @@ export function HomeProductTile({ product, priority = false, tone = "light" }: P
           {variant && <p className="ms-tile-spec">{variant}</p>}
           <div className="ms-price-row">
             <span className="ms-price">{formatINR(price)}</span>
-            {mrp > price && (
-              <span className="ms-mrp">{formatINR(mrp)}</span>
-            )}
+            {mrp > price && <span className="ms-mrp">{formatINR(mrp)}</span>}
           </div>
-          {save > 0 && (
-            <p className="ms-save">You save {formatINR(save)}</p>
-          )}
+          {save > 0 && <p className="ms-save">You save {formatINR(save)}</p>}
           <span className="ms-tile-cta">View details</span>
         </div>
       </Link>

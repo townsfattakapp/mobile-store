@@ -7,6 +7,7 @@ import {
 } from "@/lib/storefront/format";
 import type { HomeProduct } from "./HomeProductTile";
 import { getStorefrontProfile } from "@/lib/store/profile";
+import { ProductImage } from "@/components/storefront/ProductImage";
 
 type Props = {
   featured: HomeProduct[];
@@ -22,6 +23,10 @@ export async function HomeHero({ featured }: Props) {
 
   return (
     <section className="ms-hero" aria-label="Featured smartphones">
+      {primary?.main_image_url ? (
+        <link rel="preload" as="image" href={primary.main_image_url} fetchPriority="high" />
+      ) : null}
+
       <div className="ms-hero-bg" aria-hidden>
         <div className="ms-hero-wash" />
         <div className="ms-jaali ms-jaali--hero" />
@@ -86,14 +91,13 @@ export async function HomeHero({ featured }: Props) {
               className="ms-hero-device ms-hero-device--solo ms-float"
               aria-label={cleanProductName(primary.name)}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
+              <ProductImage
                 src={primary.main_image_url}
                 alt={cleanProductName(primary.name)}
+                priority
                 width={520}
                 height={640}
-                fetchPriority="high"
-                decoding="async"
+                sizes="(max-width: 900px) 70vw, 420px"
                 className="ms-hero-device-img ms-img-knockout"
               />
             </Link>

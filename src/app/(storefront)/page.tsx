@@ -139,7 +139,7 @@ export default async function HomePage() {
           {launches.length > 0 ? (
             <div className="ms-product-rail">
               {launches.map((product, i) => (
-                <HomeProductTile key={product.id} product={product} priority={i < 2} />
+                <HomeProductTile key={product.id} product={product} priority={i < 4} />
               ))}
             </div>
           ) : (
