@@ -30,12 +30,12 @@ export function InvoiceDocument({ invoice }: Props) {
       )}
 
       {/* Top bar */}
-      <div className="flex justify-between items-start border-b-2 border-black pb-2 mb-2">
+      <div className="flex justify-between items-start border-b-2 border-black pb-1.5 mb-1.5">
         <div>
-          <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#6e6e73] mb-0.5">
+          <p className="text-[8px] font-semibold uppercase tracking-[0.16em] text-[#6e6e73] mb-0.5">
             {isTaxInvoice ? "Original for Recipient" : "Customer Copy"}
           </p>
-          <h1 className="text-lg font-black tracking-tight uppercase leading-tight">
+          <h1 className="text-base font-black tracking-tight uppercase leading-tight">
             {store.document_title || (isTaxInvoice ? "Tax Invoice" : "Retail Invoice")}
           </h1>
           {isBillOfSupply && (
@@ -47,9 +47,9 @@ export function InvoiceDocument({ invoice }: Props) {
             <p className="text-[9px] text-[#6e6e73] mt-0.5">Non-GST Invoice / Bill</p>
           )}
         </div>
-        <div className="text-right">
-          <p className="text-sm font-bold tracking-tight">{store.trade_name || store.legal_name}</p>
-          <p className="text-[#424245] mt-0.5 leading-snug">
+        <div className="text-right leading-tight">
+          <p className="text-[12px] font-bold tracking-tight">{store.trade_name || store.legal_name}</p>
+          <p className="text-[#424245] mt-0.5">
             {store.address_line1}
             {store.address_line2 ? `, ${store.address_line2}` : ""}
             <br />
@@ -67,9 +67,9 @@ export function InvoiceDocument({ invoice }: Props) {
       </div>
 
       {/* Meta + parties */}
-      <div className="grid grid-cols-2 gap-3 mb-2">
-        <div className="border border-gray-300 rounded-md p-2">
-          <p className="text-[9px] font-bold uppercase tracking-wider text-[#6e6e73] mb-1">
+      <div className="grid grid-cols-2 gap-2 mb-1.5">
+        <div className="border border-gray-300 rounded p-1.5">
+          <p className="text-[8px] font-bold uppercase tracking-wider text-[#6e6e73] mb-0.5">
             Bill To / Consignee
           </p>
           <p className="font-bold text-[11px]">{customer.full_name}</p>
@@ -85,8 +85,8 @@ export function InvoiceDocument({ invoice }: Props) {
           {customer.gstin && <p className="font-semibold mt-0.5">GSTIN: {customer.gstin}</p>}
         </div>
 
-        <div className="border border-gray-300 rounded-md p-2">
-          <p className="text-[9px] font-bold uppercase tracking-wider text-[#6e6e73] mb-1">
+        <div className="border border-gray-300 rounded p-1.5">
+          <p className="text-[8px] font-bold uppercase tracking-wider text-[#6e6e73] mb-0.5">
             Invoice Details
           </p>
           <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
@@ -137,49 +137,49 @@ export function InvoiceDocument({ invoice }: Props) {
       </div>
 
       {/* Line items */}
-      <table className="w-full border-collapse mb-2">
+      <table className="w-full border-collapse mb-1.5">
         <thead>
           <tr className="bg-neutral-100 border border-gray-300">
-            <th className="border border-gray-300 px-1.5 py-1 text-left w-6">#</th>
-            <th className="border border-gray-300 px-1.5 py-1 text-left">Description</th>
-            <th className="border border-gray-300 px-1.5 py-1 text-left">HSN</th>
-            <th className="border border-gray-300 px-1.5 py-1 text-center">Qty</th>
-            <th className="border border-gray-300 px-1.5 py-1 text-right">Rate</th>
+            <th className="border border-gray-300 px-1 py-0.5 text-left w-6">#</th>
+            <th className="border border-gray-300 px-1 py-0.5 text-left">Description</th>
+            <th className="border border-gray-300 px-1 py-0.5 text-left">HSN</th>
+            <th className="border border-gray-300 px-1 py-0.5 text-center">Qty</th>
+            <th className="border border-gray-300 px-1 py-0.5 text-right">Rate</th>
             {showGstCols && (
               <>
-                <th className="border border-gray-300 px-1.5 py-1 text-right">Taxable</th>
-                <th className="border border-gray-300 px-1.5 py-1 text-right">CGST</th>
-                <th className="border border-gray-300 px-1.5 py-1 text-right">SGST</th>
-                <th className="border border-gray-300 px-1.5 py-1 text-right">IGST</th>
+                <th className="border border-gray-300 px-1 py-0.5 text-right">Taxable</th>
+                <th className="border border-gray-300 px-1 py-0.5 text-right">CGST</th>
+                <th className="border border-gray-300 px-1 py-0.5 text-right">SGST</th>
+                <th className="border border-gray-300 px-1 py-0.5 text-right">IGST</th>
               </>
             )}
-            <th className="border border-gray-300 px-1.5 py-1 text-right">Amount</th>
+            <th className="border border-gray-300 px-1 py-0.5 text-right">Amount</th>
           </tr>
         </thead>
         <tbody>
           {items.map((item, idx) => (
             <tr key={idx} className="align-top">
-              <td className="border border-gray-300 px-1.5 py-1">{idx + 1}</td>
-              <td className="border border-gray-300 px-1.5 py-1">
+              <td className="border border-gray-300 px-1 py-0.5">{idx + 1}</td>
+              <td className="border border-gray-300 px-1 py-0.5">
                 <p className="font-semibold">{item.product_name}</p>
                 {item.variant_name && (
                   <p className="text-[#6e6e73]">{item.variant_name}</p>
                 )}
-                <p className="text-[#6e6e73] font-mono text-[9px]">SKU: {item.sku}</p>
+                <p className="text-[#6e6e73] font-mono text-[8px]">SKU: {item.sku}</p>
               </td>
-              <td className="border border-gray-300 px-1.5 py-1">{item.hsn}</td>
-              <td className="border border-gray-300 px-1.5 py-1 text-center">
+              <td className="border border-gray-300 px-1 py-0.5">{item.hsn}</td>
+              <td className="border border-gray-300 px-1 py-0.5 text-center">
                 {item.quantity} {item.unit}
               </td>
-              <td className="border border-gray-300 px-1.5 py-1 text-right">
+              <td className="border border-gray-300 px-1 py-0.5 text-right">
                 {formatINRPlain(item.unit_price)}
               </td>
               {showGstCols && (
                 <>
-                  <td className="border border-gray-300 px-1.5 py-1 text-right">
+                  <td className="border border-gray-300 px-1 py-0.5 text-right">
                     {formatINRPlain(item.taxable_amount)}
                   </td>
-                  <td className="border border-gray-300 px-1.5 py-1 text-right">
+                  <td className="border border-gray-300 px-1 py-0.5 text-right">
                     {item.cgst > 0 ? (
                       <>
                         {formatINRPlain(item.cgst)}
@@ -189,7 +189,7 @@ export function InvoiceDocument({ invoice }: Props) {
                       "—"
                     )}
                   </td>
-                  <td className="border border-gray-300 px-1.5 py-1 text-right">
+                  <td className="border border-gray-300 px-1 py-0.5 text-right">
                     {item.sgst > 0 ? (
                       <>
                         {formatINRPlain(item.sgst)}
@@ -199,7 +199,7 @@ export function InvoiceDocument({ invoice }: Props) {
                       "—"
                     )}
                   </td>
-                  <td className="border border-gray-300 px-1.5 py-1 text-right">
+                  <td className="border border-gray-300 px-1 py-0.5 text-right">
                     {item.igst > 0 ? (
                       <>
                         {formatINRPlain(item.igst)}
@@ -211,7 +211,7 @@ export function InvoiceDocument({ invoice }: Props) {
                   </td>
                 </>
               )}
-              <td className="border border-gray-300 px-1.5 py-1 text-right font-semibold">
+              <td className="border border-gray-300 px-1 py-0.5 text-right font-semibold">
                 {formatINRPlain(item.line_total)}
               </td>
             </tr>
@@ -220,12 +220,12 @@ export function InvoiceDocument({ invoice }: Props) {
       </table>
 
       {/* Totals */}
-      <div className="grid grid-cols-2 gap-3 mb-2">
+      <div className="grid grid-cols-2 gap-2 mb-1.5">
         <div>
-          <p className="text-[9px] font-bold uppercase tracking-wider text-[#6e6e73] mb-0.5">
+          <p className="text-[8px] font-bold uppercase tracking-wider text-[#6e6e73] mb-0.5">
             Amount in Words
           </p>
-          <p className="font-semibold text-[11px] border border-gray-300 rounded p-1.5 bg-neutral-50 leading-snug">
+          <p className="font-semibold text-[10px] border border-gray-300 rounded p-1 bg-neutral-50 leading-snug">
             {totals.amount_in_words}
           </p>
           {totals.tax_inclusive && isTaxInvoice && (
@@ -330,11 +330,11 @@ export function InvoiceDocument({ invoice }: Props) {
       </div>
 
       {/* Bank + signature */}
-      <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-300">
-        <div className="text-[10px] leading-snug">
+      <div className="grid grid-cols-2 gap-2 pt-1.5 border-t border-gray-300">
+        <div className="text-[9px] leading-snug">
           {(store.bank_name || store.bank_account) && (
             <>
-              <p className="text-[9px] font-bold uppercase tracking-wider text-[#6e6e73] mb-0.5">
+              <p className="text-[8px] font-bold uppercase tracking-wider text-[#6e6e73] mb-0.5">
                 Bank Details
               </p>
               {store.bank_name && <p>Bank: {store.bank_name}</p>}
@@ -344,23 +344,23 @@ export function InvoiceDocument({ invoice }: Props) {
             </>
           )}
         </div>
-        <div className="text-right flex flex-col items-end justify-end min-h-[48px]">
-          <p className="font-semibold text-[10px]">For {store.legal_name}</p>
-          <div className="h-7" />
-          <p className="border-t border-gray-400 pt-0.5 text-[10px] text-[#6e6e73]">
+        <div className="text-right flex flex-col items-end justify-end min-h-[36px]">
+          <p className="font-semibold text-[9px]">For {store.legal_name}</p>
+          <div className="h-5" />
+          <p className="border-t border-gray-400 pt-0.5 text-[9px] text-[#6e6e73]">
             {store.authorized_signatory || "Authorized Signatory"}
           </p>
         </div>
       </div>
 
-      <p className="text-center text-[8px] text-[#6e6e73] mt-2 print:mt-1 leading-tight">
+      <p className="text-center text-[8px] text-[#6e6e73] mt-1.5 leading-tight">
         This is a computer-generated invoice
         {invoice.is_gst ? " under the GST Act, 2017" : ""}.
         {isCancelled && invoice.cancel_reason
           ? ` Cancelled: ${invoice.cancel_reason}`
           : ""}
       </p>
-      <p className="text-center text-[9px] font-medium text-[#424245] mt-1 print:mt-0.5 tracking-wide">
+      <p className="text-center text-[9px] font-semibold text-[#1d1d1f] mt-0.5 tracking-wide">
         Powered By Evolw - Fattakse A unit of Evolw
       </p>
     </div>

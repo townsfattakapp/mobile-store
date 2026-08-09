@@ -68,7 +68,7 @@ function InvoiceDetailInner({ id }: { id: string }) {
   }
 
   return (
-    <div className="min-h-screen">
+    <div className="invoice-page min-h-screen print:min-h-0">
       <div className="print:hidden max-w-4xl mx-auto mb-6 flex flex-wrap justify-between items-center gap-3 px-2">
         <Button variant="outline" onClick={() => router.push("/admin/invoices")} className="gap-2 bg-white">
           <ArrowLeft className="w-4 h-4" /> All Invoices
@@ -104,34 +104,65 @@ function InvoiceDetailInner({ id }: { id: string }) {
       <style dangerouslySetInnerHTML={{
         __html: `
           @page {
-            size: A4;
-            margin: 8mm 10mm;
+            size: A4 portrait;
+            margin: 6mm;
           }
           @media print {
             html, body {
+              height: auto !important;
+              min-height: 0 !important;
+              margin: 0 !important;
+              padding: 0 !important;
               background: white !important;
+              overflow: hidden !important;
               -webkit-print-color-adjust: exact;
               print-color-adjust: exact;
             }
-            body * { visibility: hidden; }
-            .invoice-sheet, .invoice-sheet * { visibility: visible; }
+            /* Hide everything except the invoice — avoids blank page 2 from layout chrome */
+            body * {
+              visibility: hidden !important;
+            }
+            .invoice-sheet,
+            .invoice-sheet * {
+              visibility: visible !important;
+            }
+            .invoice-page {
+              min-height: 0 !important;
+              height: auto !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              overflow: hidden !important;
+            }
+            .print\\:hidden {
+              display: none !important;
+              height: 0 !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              overflow: hidden !important;
+            }
             .invoice-sheet {
-              position: absolute;
-              left: 0;
-              top: 0;
-              width: 100%;
+              position: fixed !important;
+              left: 0 !important;
+              top: 0 !important;
+              width: 100% !important;
               max-width: none !important;
+              margin: 0 !important;
+              padding: 0 !important;
               box-shadow: none !important;
               border: none !important;
               border-radius: 0 !important;
-              page-break-inside: avoid;
-              break-inside: avoid;
+              background: white !important;
+              /* Slight shrink so Safari header/footer + one-line spill never creates page 2 */
+              zoom: 0.92;
+              page-break-after: avoid !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+              break-after: avoid !important;
             }
             .invoice-doc {
-              page-break-inside: avoid;
-              break-inside: avoid;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
             }
-            .print\\:hidden { display: none !important; }
           }
         `,
       }} />
