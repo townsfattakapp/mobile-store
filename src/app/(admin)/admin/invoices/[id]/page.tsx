@@ -33,7 +33,7 @@ function InvoiceDetailInner({ id }: { id: string }) {
 
   useEffect(() => {
     if (!loading && invoice && searchParams.get("print") === "1") {
-      const t = setTimeout(() => window.print(), 400);
+      const t = setTimeout(() => window.print(), 150);
       return () => clearTimeout(t);
     }
   }, [loading, invoice, searchParams]);
@@ -95,15 +95,24 @@ function InvoiceDetailInner({ id }: { id: string }) {
         </div>
       </div>
 
-      <div className="max-w-4xl mx-auto bg-white shadow-lg border rounded-xl print:shadow-none print:border-0 print:rounded-none invoice-sheet">
-        <div className="p-8 md:p-10 print:p-4">
+      <div className="max-w-4xl mx-auto bg-white shadow-lg border rounded-xl print:shadow-none print:border-0 print:rounded-none print:max-w-none invoice-sheet">
+        <div className="p-8 md:p-10 print:p-0">
           <InvoiceDocument invoice={invoice} />
         </div>
       </div>
 
       <style dangerouslySetInnerHTML={{
         __html: `
+          @page {
+            size: A4;
+            margin: 8mm 10mm;
+          }
           @media print {
+            html, body {
+              background: white !important;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
             body * { visibility: hidden; }
             .invoice-sheet, .invoice-sheet * { visibility: visible; }
             .invoice-sheet {
@@ -111,8 +120,16 @@ function InvoiceDetailInner({ id }: { id: string }) {
               left: 0;
               top: 0;
               width: 100%;
+              max-width: none !important;
               box-shadow: none !important;
               border: none !important;
+              border-radius: 0 !important;
+              page-break-inside: avoid;
+              break-inside: avoid;
+            }
+            .invoice-doc {
+              page-break-inside: avoid;
+              break-inside: avoid;
             }
             .print\\:hidden { display: none !important; }
           }

@@ -200,9 +200,13 @@ export default function POSPage() {
     if (res.error) {
       alert(res.error);
       setIsProcessing(false);
-    } else if (res.invoiceId) {
-      router.push(`/admin/invoices/${res.invoiceId}`);
+      return;
     }
+    if (res.invoiceId) {
+      router.push(`/admin/invoices/${res.invoiceId}?print=1`);
+      return;
+    }
+    setIsProcessing(false);
   };
 
   return (

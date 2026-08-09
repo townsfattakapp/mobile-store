@@ -165,67 +165,97 @@ export async function createWalkinOrderAndInvoice(data: {
 
   if (orderError) return { error: "Order creation failed: " + orderError.message };
 
-  for (const item of data.cart) {
-    let taxRate = 18;
-    const { data: prod } = await supabase
-      .from("products")
-      .select("tax_rate")
-      .eq("id", item.product_id)
-      .maybeSingle();
-    if (prod?.tax_rate != null) taxRate = Number(prod.tax_rate);
+  // Batch product tax + stock reads (was ~4 DB round-trips per cart line)
+  const productIds = [...new Set(data.cart.map((i) => i.product_id).filter(Boolean))];
+  const variantIds = [
+    ...new Set(
+      data.cart.map((i) => i.variant_id).filter((id): id is string => Boolean(id))
+    ),
+  ];
 
-    await supabase.from("order_items").insert([
-      {
-        order_id: order.id,
-        product_id: item.product_id,
-        variant_id: item.variant_id,
-        product_name: item.name,
-        sku: item.sku,
-        quantity: item.quantity,
-        unit_price: item.list_price,
-        discount: item.line_discount,
-        tax_rate: taxRate,
-        total_price: item.line_total,
-      },
-    ]);
-
-    if (item.variant_id) {
-      const { data: vdata } = await supabase
-        .from("product_variants")
-        .select("stock_quantity")
-        .eq("id", item.variant_id)
-        .single();
-      if (vdata) {
-        await supabase
-          .from("product_variants")
-          .update({ stock_quantity: vdata.stock_quantity - item.quantity })
-          .eq("id", item.variant_id);
-      }
-    } else {
-      const { data: pdata } = await supabase
-        .from("products")
-        .select("stock_quantity")
-        .eq("id", item.product_id)
-        .single();
-      if (pdata) {
-        await supabase
+  const [productsRes, variantsRes] = await Promise.all([
+    productIds.length
+      ? supabase
           .from("products")
-          .update({ stock_quantity: pdata.stock_quantity - item.quantity })
-          .eq("id", item.product_id);
-      }
-    }
+          .select("id, tax_rate, stock_quantity")
+          .in("id", productIds)
+      : Promise.resolve({ data: [] as { id: string; tax_rate: number | null; stock_quantity: number }[] }),
+    variantIds.length
+      ? supabase
+          .from("product_variants")
+          .select("id, stock_quantity")
+          .in("id", variantIds)
+      : Promise.resolve({ data: [] as { id: string; stock_quantity: number }[] }),
+  ]);
+
+  const taxByProduct = new Map<string, number>();
+  const stockByProduct = new Map<string, number>();
+  for (const p of productsRes.data || []) {
+    taxByProduct.set(p.id, p.tax_rate != null ? Number(p.tax_rate) : 18);
+    stockByProduct.set(p.id, Number(p.stock_quantity) || 0);
+  }
+  const stockByVariant = new Map<string, number>();
+  for (const v of variantsRes.data || []) {
+    stockByVariant.set(v.id, Number(v.stock_quantity) || 0);
   }
 
-  const invRes = await generateInvoice({
-    orderId: order.id,
-    mode: "auto",
-    notes: notes,
-  });
+  const orderItemRows = data.cart.map((item) => ({
+    order_id: order.id,
+    product_id: item.product_id,
+    variant_id: item.variant_id,
+    product_name: item.name,
+    sku: item.sku,
+    quantity: item.quantity,
+    unit_price: item.list_price,
+    discount: item.line_discount,
+    tax_rate: taxByProduct.get(item.product_id) ?? 18,
+    total_price: item.line_total,
+  }));
+
+  const { error: itemsErr } = await supabase.from("order_items").insert(orderItemRows);
+  if (itemsErr) {
+    return { error: "Failed to save order items: " + itemsErr.message, orderId: order.id };
+  }
+
+  // Stock updates don't block invoice numbering — run alongside invoice gen
+  const stockPromise = Promise.all(
+    data.cart.map(async (item) => {
+      if (item.variant_id) {
+        const current = stockByVariant.get(item.variant_id);
+        if (current == null) return;
+        const next = Math.max(0, current - item.quantity);
+        stockByVariant.set(item.variant_id, next);
+        await supabase
+          .from("product_variants")
+          .update({ stock_quantity: next })
+          .eq("id", item.variant_id);
+      } else {
+        const current = stockByProduct.get(item.product_id);
+        if (current == null) return;
+        const next = Math.max(0, current - item.quantity);
+        stockByProduct.set(item.product_id, next);
+        await supabase
+          .from("products")
+          .update({ stock_quantity: next })
+          .eq("id", item.product_id);
+      }
+    })
+  );
+
+  const [invRes] = await Promise.all([
+    generateInvoice({
+      orderId: order.id,
+      mode: "auto",
+      notes: notes,
+    }),
+    stockPromise,
+  ]);
 
   if (invRes.error) {
     return {
       error: "Order placed, but invoice generation failed: " + invRes.error,
       orderId: order.id,
+      invoiceId: invRes.invoiceId,
     };
   }
 

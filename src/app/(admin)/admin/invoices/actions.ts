@@ -256,34 +256,47 @@ export type GenerateInvoiceInput = {
 
 export async function generateInvoice(input: GenerateInvoiceInput) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   if (!user) return { error: "Unauthorized" };
 
-  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+  // Parallel auth + order + settings (was sequential round-trips)
+  const [profileRes, orderRes, settingsRes, existingRes] = await Promise.all([
+    supabase.from("profiles").select("role").eq("id", user.id).single(),
+    supabase.from("orders").select("*, order_items(*)").eq("id", input.orderId).single(),
+    supabase.from("store_settings").select("*").limit(1).maybeSingle(),
+    supabase
+      .from("invoices")
+      .select("id, invoice_number, status")
+      .eq("order_id", input.orderId)
+      .neq("status", "cancelled")
+      .maybeSingle(),
+  ]);
+
+  const profile = profileRes.data;
   if (!profile || (profile.role !== "admin" && profile.role !== "staff")) {
     return { error: "Forbidden" };
   }
 
-  const settings = await getStoreSettings();
-
-  const { data: order, error: orderErr } = await supabase
-    .from("orders")
-    .select("*, order_items(*)")
-    .eq("id", input.orderId)
-    .single();
-
+  const { data: order, error: orderErr } = orderRes;
   if (orderErr || !order) return { error: "Order not found" };
 
-  const { data: existing } = await supabase
-    .from("invoices")
-    .select("id, invoice_number, status")
-    .eq("order_id", order.id)
-    .neq("status", "cancelled")
-    .maybeSingle();
-
-  if (existing) {
-    return { error: `Invoice already exists: ${existing.invoice_number}`, invoiceId: existing.id };
+  if (existingRes.data) {
+    return {
+      error: `Invoice already exists: ${existingRes.data.invoice_number}`,
+      invoiceId: existingRes.data.id,
+    };
   }
+
+  const settings: StoreSettings = {
+    ...DEFAULT_STORE_SETTINGS,
+    ...(settingsRes.data || {}),
+    default_gst_rate: Number(settingsRes.data?.default_gst_rate ?? 18),
+    tax_inclusive_pricing: settingsRes.data?.tax_inclusive_pricing ?? true,
+    gst_registered: settingsRes.data?.gst_registered ?? false,
+    composition_scheme: settingsRes.data?.composition_scheme ?? false,
+  };
 
   // Resolve GST vs Non-GST
   let isGst = false;
@@ -484,11 +497,16 @@ export async function generateInvoice(input: GenerateInvoiceInput) {
     tax_inclusive: taxInclusive,
   };
 
-  // Persist computed tax on the order for reports (best-effort)
-  await supabase
-    .from("orders")
-    .update({ tax_total: taxTotal })
-    .eq("id", order.id);
+  // Persist computed tax on the order for reports (best-effort, parallel with seq)
+  const fy = getFinancialYear(new Date());
+  const kind = isGst ? "gst" : "nongst";
+  const prefix = isGst ? settings.invoice_prefix_gst : settings.invoice_prefix_nongst;
+
+  const [, seq] = await Promise.all([
+    supabase.from("orders").update({ tax_total: taxTotal }).eq("id", order.id),
+    nextSeq(supabase, fy, kind),
+  ]);
+  const invoiceNumber = formatInvoiceNumber(prefix || (isGst ? "GST" : "BILL"), fy, seq);
 
   const storeSnapshot: StoreSnapshot = {
     ...settings,
@@ -503,12 +521,6 @@ export async function generateInvoice(input: GenerateInvoiceInput) {
     place_of_supply_state: buyerState.name,
     place_of_supply_code: buyerStateCode,
   };
-
-  const fy = getFinancialYear(new Date());
-  const kind = isGst ? "gst" : "nongst";
-  const prefix = isGst ? settings.invoice_prefix_gst : settings.invoice_prefix_nongst;
-  const seq = await nextSeq(supabase, fy, kind);
-  const invoiceNumber = formatInvoiceNumber(prefix || (isGst ? "GST" : "BILL"), fy, seq);
 
   const payload = {
     invoice_number: invoiceNumber,
