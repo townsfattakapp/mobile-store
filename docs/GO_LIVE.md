@@ -67,6 +67,23 @@ Then in Admin Settings (on the owner’s phone browser): **Enable alerts on this
 - [ ] Razorpay live keys (or keep demo only if intentionally testing)
 - [ ] Cloudflare R2 env vars for images / store profile JSON
 
+### D2. Custom domain DNS (important — verified 2026-08-10)
+
+Live Next.js deploy that passes smoke:
+
+- https://mobile-store-umber-gamma.vercel.app  (21/21 smoke OK after this release)
+
+`mahadevmobiles.com` / `www.mahadevmobiles.com` currently respond from **Hostinger** (not the Vercel Next app). Most paths return 404 there.
+
+To finish production cutover:
+
+1. In Vercel project → Domains → add `mahadevmobiles.com` + `www`
+2. Point DNS (A/CNAME) from Hostinger to Vercel as shown in the dashboard
+3. Set `NEXT_PUBLIC_SITE_URL=https://mahadevmobiles.com` (or `https://www.…`) in Vercel Production
+4. Redeploy once, then run: `npm run smoke -- https://mahadevmobiles.com`
+
+Until DNS is moved, share/test the Vercel URL above.
+
 ### E. Smoke after deploy
 
 ```bash
