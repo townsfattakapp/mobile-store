@@ -45,11 +45,19 @@ export default function LoginClient() {
       return;
     }
 
-    const { data: profile } = await supabase
+    const { data: profile, error: profileError } = await supabase
       .from("profiles")
       .select("role")
       .eq("id", data.user.id)
       .maybeSingle();
+
+    if (profileError) {
+      setError(
+        "Signed in, but could not load your profile role. Refresh and try again."
+      );
+      setIsLoading(false);
+      return;
+    }
 
     router.refresh();
     if (profile && (profile.role === "admin" || profile.role === "staff")) {

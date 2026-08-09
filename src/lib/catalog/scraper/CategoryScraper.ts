@@ -114,6 +114,16 @@ export function isCategoryUrl(url: string): boolean {
       if (/\/all-smartphones$|\/all-tablets$|\/all-watches$/i.test(path)) return true;
       if (/\/smartphones$|\/mobile$/i.test(path)) return true;
       if (/\/smartphones\/galaxy-[a-z]$/i.test(path)) return true;
+      // Computers / Galaxy Book hubs — not SKU pages with embedded -np…
+      if (/\/all-computers$/i.test(path) || /\/computers\/?$/i.test(path)) return true;
+      if (
+        /\/galaxy-book/i.test(path) &&
+        !/-np[0-9a-z-]+/i.test(path) &&
+        !/\/np[0-9a-z-]+/i.test(path)
+      ) {
+        return true;
+      }
+      if (/\/monitors(\/|$)|\/all-monitors$/i.test(path)) return true;
       return false; // don't treat Samsung PDPs as hubs
     }
 
@@ -185,6 +195,59 @@ export function isCategoryUrl(url: string): boolean {
       );
     }
 
+    // OEM PC / accessory brand hubs
+    const oemHost =
+      host.includes("dell.com") ||
+      host.includes("hp.com") ||
+      host.includes("lenovo.com") ||
+      host.includes("asus.com") ||
+      host.includes("acer.com") ||
+      host.includes("belkin.com") ||
+      host.includes("syska.co.in") ||
+      host.includes("anker.com");
+    if (oemHost) {
+      // Product PDPs are never hubs
+      if (/\/shop\/products\//i.test(path)) return false;
+      if (/\/p\/[^/]+/i.test(path) && host.includes("lenovo.com")) return false;
+      if (/\/p\/[^/]+\/[^/]+\.html$/i.test(path) && host.includes("belkin.com"))
+        return false;
+      if (/\/products\/[^/]+/i.test(path) && !/\/products\/?$/i.test(path)) {
+        if (host.includes("syska") || host.includes("anker")) return false;
+      }
+      if (
+        host.includes("asus.com") &&
+        /\/laptops\/[^/]+\/[^/]+\/asus-[a-z0-9-]+$/i.test(path)
+      ) {
+        return false;
+      }
+      if (host.includes("dell.com") && /\/shop\/laptop\/[a-z0-9-]+$/i.test(path))
+        return false;
+      if (
+        host.includes("acer.com") &&
+        /\/laptops\/[^/]+\/[a-z0-9-]+$/i.test(path)
+      ) {
+        return false;
+      }
+      if (
+        path === "/" ||
+        /^\/[a-z]{2}$/i.test(path) ||
+        /\/collections(\/|$)/i.test(path) ||
+        /\/listings\//i.test(path) ||
+        /\/category\//i.test(path) ||
+        /\/products\/?$/i.test(path) ||
+        /\/laptops(\/|$)/i.test(path) ||
+        /\/shop(\.html)?$/i.test(path) ||
+        /\/c\/laptops/i.test(path) ||
+        /\/d\/laptops/i.test(path) ||
+        /subseries-results/i.test(path) ||
+        /\/all-(series|products)/i.test(path) ||
+        /\/for-(home|gaming)\//i.test(path) ||
+        (host.includes("belkin.com") && /\/products\//i.test(path))
+      ) {
+        return true;
+      }
+    }
+
     if (/\/all-smartphones$/i.test(path) || /\/smartphones$/i.test(path)) {
       return true;
     }
@@ -213,7 +276,7 @@ export function isLikelyProductUrl(url: string): boolean {
     if (/\/shop\/buy-/i.test(path)) return true;
     if (/\/buy\/?$/i.test(path)) return true;
     if (/\/item\/|\/dp\/|\/p\/[^/]+/i.test(path)) return true;
-    // Samsung model pages
+    // Samsung phone / tablet model pages
     if (
       /samsung\.com/i.test(url) &&
       /\/smartphones\/galaxy-[a-z0-9-]+/i.test(path) &&
@@ -222,8 +285,44 @@ export function isLikelyProductUrl(url: string): boolean {
     ) {
       return true;
     }
-    // Apple model pages
-    if (/apple\.com/i.test(url) && /\/iphone-\d|\/iphone-air|\/iphone-se/i.test(path)) {
+    // Samsung Galaxy Book SKUs
+    if (
+      /samsung\.com/i.test(url) &&
+      /\/computers\/galaxy-book\//i.test(path) &&
+      /-np[0-9a-z-]+/i.test(path)
+    ) {
+      return true;
+    }
+    // Apple marketing PDPs (iPhone / iPad / Mac / Watch / AirPods)
+    if (
+      /apple\.com/i.test(url) &&
+      /\/(iphone-\d|iphone-air|iphone-se|iphone-16e|ipad-[a-z0-9-]+|macbook-[a-z0-9-]+|imac|mac-mini|mac-studio|mac-pro|studio-display|apple-watch|airpods)/i.test(
+        path
+      ) &&
+      !/\/(iphone|ipad|mac|watch|airpods)\/?$/i.test(path)
+    ) {
+      return true;
+    }
+    // HP Magento PDPs
+    if (/hp\.com/i.test(url) && /\/shop\/products\/[^/]+\/[^/]+/i.test(path)) {
+      return true;
+    }
+    // ASUS model pages
+    if (
+      /asus\.com/i.test(url) &&
+      /\/laptops\/[^/]+\/[^/]+\/asus-[a-z0-9-]+\/?$/i.test(path)
+    ) {
+      return true;
+    }
+    // Dell / Acer curated + live PDPs
+    if (/dell\.com/i.test(url) && /\/shop\/laptop\/[a-z0-9-]+$/i.test(path)) {
+      return true;
+    }
+    if (
+      /acer\.com/i.test(url) &&
+      /\/laptops\/[^/]+\/[a-z0-9-]+$/i.test(path) &&
+      !isCategoryUrl(url)
+    ) {
       return true;
     }
     // Google Store product
@@ -273,15 +372,79 @@ function looksLikeIphoneModel(name: string): boolean {
   );
 }
 
-function appleModelSlug(name: string): string | null {
-  if (!looksLikeIphoneModel(name)) return null;
-  return name
+function looksLikeAppleMacModel(name: string): boolean {
+  const n = name.toLowerCase().replace(/\u00A0/g, " ").trim();
+  if (n === "mac" || n === "displays" || n === "accessories") return false;
+  return (
+    /^macbook(\s+(air|pro|neo))?$/i.test(n) ||
+    /^macbook\s+(air|pro|neo)\b/i.test(n) ||
+    /^imac\b/i.test(n) ||
+    /^mac\s*mini\b/i.test(n) ||
+    /^mac\s*studio\b/i.test(n) ||
+    /^mac\s*pro\b/i.test(n) ||
+    /^studio\s*display\b/i.test(n)
+  );
+}
+
+function looksLikeAppleIpadModel(name: string): boolean {
+  const n = name.toLowerCase().replace(/\u00A0/g, " ").trim();
+  if (n === "ipad") return false;
+  return /^ipad(\s+|$)/i.test(n);
+}
+
+function looksLikeAppleWatchModel(name: string): boolean {
+  const n = name.toLowerCase().replace(/\u00A0/g, " ").trim();
+  if (n === "watch" || n === "apple watch") return false;
+  return /^apple\s+watch\b/i.test(n) || /^watch\s+(se|ultra|series)\b/i.test(n);
+}
+
+function appleFamilyFromHub(pageUrl: string): "iphone" | "mac" | "ipad" | "watch" | null {
+  try {
+    const path = new URL(pageUrl).pathname.toLowerCase();
+    if (/\/mac(\/|$)/i.test(path) && !/macbook|imac|mac-mini|mac-studio/i.test(path))
+      return "mac";
+    if (/\/ipad(\/|$)/i.test(path) && !/\/ipad-/i.test(path)) return "ipad";
+    if (/\/watch(\/|$)/i.test(path) && !/apple-watch|\/watch-/i.test(path)) return "watch";
+    if (/\/iphone(\/|$)/i.test(path)) return "iphone";
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+function looksLikeAppleLineupModel(
+  name: string,
+  family: "iphone" | "mac" | "ipad" | "watch" | null
+): boolean {
+  if (family === "mac") return looksLikeAppleMacModel(name);
+  if (family === "ipad") return looksLikeAppleIpadModel(name);
+  if (family === "watch") return looksLikeAppleWatchModel(name);
+  return looksLikeIphoneModel(name);
+}
+
+function appleModelSlug(name: string, family?: "iphone" | "mac" | "ipad" | "watch" | null): string | null {
+  if (!looksLikeAppleLineupModel(name, family ?? null) && !looksLikeIphoneModel(name) && !looksLikeAppleMacModel(name)) {
+    return null;
+  }
+  const slug = name
     .toLowerCase()
     .replace(/\u00A0/g, " ")
     .trim()
+    .replace(/^apple\s+/, "")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
+  // Mac naming: "Mac mini" → mac-mini, "iMac" → imac
+  if (/^mac-mini/.test(slug)) return "mac-mini";
+  if (/^mac-studio/.test(slug)) return "mac-studio";
+  if (/^mac-pro/.test(slug)) return "mac-pro";
+  if (/^imac/.test(slug)) return "imac";
+  if (/^macbook-air/.test(slug)) return "macbook-air";
+  if (/^macbook-pro/.test(slug)) return "macbook-pro";
+  if (/^macbook-neo/.test(slug)) return "macbook-neo";
+  if (/^studio-display/.test(slug)) return "studio-display";
+  if (slug === "macbook") return "macbook-air";
+  return slug || null;
 }
 
 function isNonProductPath(pathname: string): boolean {
@@ -291,13 +454,16 @@ function isNonProductPath(pathname: string): boolean {
 
 function isAppleProductPath(pathname: string): boolean {
   const p = pathname.replace(/\/$/, "").toLowerCase();
-  // /in/iphone-17-pro or /iphone-16
-  return /\/(iphone|ipad|macbook|imac|airpods|apple-watch)[-a-z0-9]*$/i.test(p) &&
-    !/\/(iphone|ipad|mac|watch|airpods)$/i.test(p);
+  // /in/iphone-17-pro or /iphone-16 or /macbook-air or /mac-mini
+  return (
+    /\/(iphone|ipad|macbook|imac|mac-mini|mac-studio|mac-pro|studio-display|airpods|apple-watch)[-a-z0-9]*$/i.test(
+      p
+    ) && !/\/(iphone|ipad|mac|watch|airpods)$/i.test(p)
+  );
 }
 
 /**
- * Pull Apple iPhone lineup from category HTML (chapternav + explore cards).
+ * Pull Apple lineup (iPhone / Mac / iPad / Watch) from category HTML.
  */
 function extractAppleLineup(
   $: cheerio.CheerioAPI,
@@ -307,12 +473,13 @@ function extractAppleLineup(
   const localeMatch = base.pathname.match(/^\/([a-z]{2})\//i);
   const locale = localeMatch ? localeMatch[1] : "in";
   const origin = `${base.protocol}//${base.host}`;
+  const family = appleFamilyFromHub(pageUrl);
 
   const byKey = new Map<string, ScrapedCategoryItem>();
 
   const addModel = (rawName: string, href?: string, image?: string) => {
     const name = cleanName(rawName);
-    if (!looksLikeIphoneModel(name)) return;
+    if (!looksLikeAppleLineupModel(name, family)) return;
     if (GENERIC_LINK_TEXT.has(name.toLowerCase())) return;
 
     let url = href || "";
@@ -322,17 +489,17 @@ function extractAppleLineup(
         const path = new URL(url).pathname;
         // If link points back to category hub, build product URL from name
         if (isCategoryUrl(url) || isNonProductPath(path)) {
-          const slug = appleModelSlug(name);
+          const slug = appleModelSlug(name, family);
           if (!slug) return;
           url = `${origin}/${locale}/${slug}/`;
         }
       } else {
-        const slug = appleModelSlug(name);
+        const slug = appleModelSlug(name, family);
         if (!slug) return;
         url = `${origin}/${locale}/${slug}/`;
       }
     } catch {
-      const slug = appleModelSlug(name);
+      const slug = appleModelSlug(name, family);
       if (!slug) return;
       url = `${origin}/${locale}/${slug}/`;
     }
@@ -368,64 +535,90 @@ function extractAppleLineup(
   // 2) “Explore the line-up” cards — usually h3 + Learn more / Buy
   $("h3, h2").each((_, el) => {
     const heading = cleanName($(el).text());
-    if (!looksLikeIphoneModel(heading)) return;
+    if (!looksLikeAppleLineupModel(heading, family)) return;
 
-    // Prefer nearby Learn more / product link
     const $block = $(el).closest("div, section, li, article");
     let href =
-      $block.find('a[href*="iphone-"]').filter((_, a) => {
-        try {
-          const path = new URL($(a).attr("href") || "", pageUrl).pathname;
-          return isAppleProductPath(path);
-        } catch {
-          return false;
-        }
-      }).first().attr("href") ||
-      $block.find("a").filter((_, a) => {
-        const t = cleanName($(a).text()).toLowerCase();
-        return t === "learn more" || t === "buy";
-      }).first().attr("href");
+      $block
+        .find('a[href*="iphone-"], a[href*="macbook"], a[href*="imac"], a[href*="mac-mini"], a[href*="mac-studio"], a[href*="ipad-"], a[href*="apple-watch"]')
+        .filter((_, a) => {
+          try {
+            const path = new URL($(a).attr("href") || "", pageUrl).pathname;
+            return isAppleProductPath(path);
+          } catch {
+            return false;
+          }
+        })
+        .first()
+        .attr("href") ||
+      $block
+        .find("a")
+        .filter((_, a) => {
+          const t = cleanName($(a).text()).toLowerCase();
+          return t === "learn more" || t === "buy";
+        })
+        .first()
+        .attr("href");
 
     addModel(heading, href, nearbyProductImage($, el, pageUrl));
   });
 
-  // 3) Any anchor whose text is a clear iPhone model name
+  // 3) Any anchor whose text is a clear model name
   $("a").each((_, el) => {
     const name = cleanName($(el).text());
-    if (!looksLikeIphoneModel(name)) return;
-    if (name.length > 40) return;
+    if (!looksLikeAppleLineupModel(name, family)) return;
+    if (name.length > 48) return;
     addModel(name, $(el).attr("href"), nearbyProductImage($, el, pageUrl));
   });
 
   // 4) Fallback: product paths in href even if text is messy
-  $("a[href*='iphone-']").each((_, el) => {
-    const href = $(el).attr("href");
-    if (!href) return;
-    try {
-      const full = new URL(href, pageUrl);
-      if (!isAppleProductPath(full.pathname)) return;
-      const slug = full.pathname.split("/").filter(Boolean).pop() || "";
-      const name = slug
-        .split("-")
-        .map((w) => (w === "iphone" ? "iPhone" : w.charAt(0).toUpperCase() + w.slice(1)))
-        .join(" ")
-        .replace(/Iphone/g, "iPhone");
-      if (looksLikeIphoneModel(name)) {
-        addModel(name, full.href, nearbyProductImage($, el, pageUrl));
+  const hrefBits =
+    family === "mac"
+      ? ["macbook", "imac", "mac-mini", "mac-studio", "mac-pro", "studio-display"]
+      : family === "ipad"
+        ? ["ipad-"]
+        : family === "watch"
+          ? ["apple-watch", "watch-"]
+          : ["iphone-"];
+  for (const bit of hrefBits) {
+    $(`a[href*='${bit}']`).each((_, el) => {
+      const href = $(el).attr("href");
+      if (!href) return;
+      try {
+        const full = new URL(href, pageUrl);
+        if (!isAppleProductPath(full.pathname)) return;
+        const slug = full.pathname.split("/").filter(Boolean).pop() || "";
+        const name = slug
+          .split("-")
+          .map((w) => {
+            if (w === "iphone") return "iPhone";
+            if (w === "ipad") return "iPad";
+            if (w === "imac") return "iMac";
+            if (w === "macbook") return "MacBook";
+            return w.charAt(0).toUpperCase() + w.slice(1);
+          })
+          .join(" ")
+          .replace(/Mac Mini/i, "Mac mini")
+          .replace(/Mac Studio/i, "Mac Studio");
+        if (looksLikeAppleLineupModel(name, family) || isAppleProductPath(full.pathname)) {
+          addModel(name, full.href, nearbyProductImage($, el, pageUrl));
+        }
+      } catch {
+        /* ignore */
       }
-    } catch {
-      /* ignore */
-    }
-  });
+    });
+  }
 
-  // Sort: newest-looking first (higher number), Air near top after Pro gen
+  // Sort: newest-looking first for iPhone; alpha for others
   return Array.from(byKey.values()).sort((a, b) => {
-    const num = (n: string) => {
-      const m = n.match(/iphone\s+(\d+)/i);
-      return m ? parseInt(m[1], 10) : n.toLowerCase().includes("air") ? 16.5 : 0;
-    };
-    const diff = num(b.name) - num(a.name);
-    if (diff !== 0) return diff;
+    if (family === "iphone" || !family) {
+      const num = (n: string) => {
+        const m = n.match(/iphone\s+(\d+)/i);
+        return m ? parseInt(m[1], 10) : n.toLowerCase().includes("air") ? 16.5 : 0;
+      };
+      const diff = num(b.name) - num(a.name);
+      if (diff !== 0) return diff;
+    }
     return a.name.localeCompare(b.name);
   });
 }
@@ -536,9 +729,53 @@ export class CategoryScraper {
     try {
       // Samsung India: public finder API (JS listing page has almost no PDP links)
       if (/samsung\.com/i.test(url)) {
-        const { fetchSamsungSmartphoneCatalog, isSamsungListingUrl, isSamsungProductUrl } =
-          await import("./samsung");
-        if (isSamsungListingUrl(url) || /\/smartphones|\/mobile|\/in\/?$/i.test(url)) {
+        const {
+          fetchSamsungSmartphoneCatalog,
+          isSamsungListingUrl,
+          isSamsungProductUrl,
+          isSamsungComputerProductUrl,
+        } = await import("./samsung");
+        const isComputersHub =
+          (isSamsungListingUrl(url) &&
+            /\/computers|galaxy-book|\/monitors|all-monitors|all-computers/i.test(
+              url
+            )) ||
+          (/\/computers|all-computers|\/monitors|all-monitors/i.test(url) &&
+            !isSamsungComputerProductUrl(url) &&
+            !isSamsungProductUrl(url));
+        if (isComputersHub) {
+          try {
+            const res = await fetch(url, {
+              headers: {
+                "User-Agent":
+                  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                "Accept-Language": "en-IN,en;q=0.9",
+              },
+              cache: "no-store",
+            });
+            if (res.ok) {
+              const html = await res.text();
+              const { extractSamsungComputerLinksFromHtml } = await import(
+                "./samsung"
+              );
+              const pcItems = extractSamsungComputerLinksFromHtml(html, url);
+              if (pcItems.length > 0) {
+                return pcItems.map((i) => ({
+                  name: i.name,
+                  url: i.url,
+                  kind: "product" as const,
+                }));
+              }
+            }
+          } catch {
+            /* fall through */
+          }
+        }
+        if (
+          !isComputersHub &&
+          (isSamsungListingUrl(url) ||
+            /\/smartphones|\/mobile|\/tablets|\/watches|\/in\/?$/i.test(url))
+        ) {
           const samsungItems = await fetchSamsungSmartphoneCatalog(url);
           if (samsungItems.length > 0) {
             return samsungItems.map((i) => ({
@@ -550,7 +787,31 @@ export class CategoryScraper {
           }
         }
         // Single Samsung PDP should not expand via HTML related links
-        if (isSamsungProductUrl(url)) return [];
+        if (isSamsungProductUrl(url) || isSamsungComputerProductUrl(url)) return [];
+      }
+
+      // OEM PC + accessory brands (HP / Lenovo / ASUS / Dell / Acer / Belkin / Syska / Anker)
+      {
+        const {
+          isOemStoreHost,
+          isOemListingUrl,
+          isOemProductUrl,
+          fetchOemCatalog,
+        } = await import("./oemStores");
+        if (isOemStoreHost(url)) {
+          if (isOemProductUrl(url)) return [];
+          if (isOemListingUrl(url) || isCategoryUrl(url)) {
+            const oem = await fetchOemCatalog(url);
+            if (oem.length > 0) {
+              return oem.map((i) => ({
+                name: i.name,
+                url: i.url,
+                kind: "product" as const,
+                ...(i.image ? { image: i.image } : {}),
+              }));
+            }
+          }
+        }
       }
 
       // Nothing India — Storefront GraphQL (Oxygen; no products.json)
@@ -717,8 +978,8 @@ export class CategoryScraper {
 
         if (!response.ok) {
           console.error(`CategoryScraper failed to fetch ${url}. Status: ${response.status}`);
-          if (url.includes("apple.com") && url.includes("iphone")) {
-            return this.appleIphoneFallback(url);
+          if (url.includes("apple.com")) {
+            return this.appleFamilyFallback(url);
           }
           return [];
         }
@@ -728,10 +989,10 @@ export class CategoryScraper {
 
         let items: ScrapedCategoryItem[] = [];
 
-        if (url.includes("apple.com") && /iphone/i.test(url)) {
+        if (url.includes("apple.com") && /\/(iphone|mac|ipad|watch)(\/|$|\?)/i.test(url)) {
           items = extractAppleLineup($, url);
           if (items.length < 3) {
-            const fallback = this.appleIphoneFallback(url);
+            const fallback = this.appleFamilyFallback(url);
             const keys = new Set(items.map((i) => i.name.toLowerCase()));
             for (const f of fallback) {
               if (!keys.has(f.name.toLowerCase())) items.push(f);
@@ -765,11 +1026,15 @@ export class CategoryScraper {
             // Keep product PDPs; drop pure category hubs
             if (/\/products\/[^/]+/i.test(p) || /\/product\/[^/]+/i.test(p)) return true;
             if (/\/buy\/?$/i.test(p)) return true;
+            if (/\/shop\/products\//i.test(p)) return true;
+            if (/-np[0-9a-z-]+/i.test(p) && /galaxy-book/i.test(p)) return true;
+            if (isAppleProductPath(p)) return true;
             if (isCategoryUrl(i.url) && i.kind === "category") return false;
             if (isCategoryUrl(i.url) && !/\/products?\//i.test(p) && !/\/buy\/?$/i.test(p))
               return false;
             // Drop Samsung "all-*" hubs mislabeled as products
-            if (/\/all-(smartphones|tablets|watches|mobile-accessories)/i.test(p)) return false;
+            if (/\/all-(smartphones|tablets|watches|mobile-accessories|computers)/i.test(p))
+              return false;
             return i.kind !== "category";
           } catch {
             return true;
@@ -780,8 +1045,8 @@ export class CategoryScraper {
       }
     } catch (error) {
       console.error(`CategoryScraper error on ${url}:`, error);
-      if (url.includes("apple.com") && url.includes("iphone")) {
-        return this.appleIphoneFallback(url);
+      if (url.includes("apple.com")) {
+        return this.appleFamilyFallback(url);
       }
       return [];
     }
@@ -791,7 +1056,7 @@ export class CategoryScraper {
    * When Apple HTML is heavily JS-rendered / blocked, still return the current lineup.
    * URLs follow Apple IN product-page conventions.
    */
-  private appleIphoneFallback(pageUrl: string): ScrapedCategoryItem[] {
+  private appleFamilyFallback(pageUrl: string): ScrapedCategoryItem[] {
     let origin = "https://www.apple.com";
     let locale = "in";
     try {
@@ -803,21 +1068,46 @@ export class CategoryScraper {
       /* keep defaults */
     }
 
-    const models = [
-      "iPhone 17 Pro",
-      "iPhone Air",
-      "iPhone 17",
-      "iPhone 17e",
-      "iPhone 16",
-    ];
+    const family = appleFamilyFromHub(pageUrl);
+    let models: string[] = [];
+    if (family === "mac") {
+      models = [
+        "MacBook Air",
+        "MacBook Pro",
+        "MacBook Neo",
+        "iMac",
+        "Mac mini",
+        "Mac Studio",
+        "Studio Display",
+      ];
+    } else if (family === "ipad") {
+      models = ["iPad Pro", "iPad Air", "iPad", "iPad mini"];
+    } else if (family === "watch") {
+      models = [
+        "Apple Watch Series 11",
+        "Apple Watch Ultra 3",
+        "Apple Watch SE 3",
+      ];
+    } else {
+      models = [
+        "iPhone 17 Pro",
+        "iPhone Air",
+        "iPhone 17",
+        "iPhone 17e",
+        "iPhone 16",
+      ];
+    }
 
-    return models.map((name) => {
-      const slug = appleModelSlug(name)!;
-      return {
-        name,
-        url: `${origin}/${locale}/${slug}/`,
-        kind: "product" as const,
-      };
-    });
+    return models
+      .map((name) => {
+        const slug = appleModelSlug(name, family);
+        if (!slug) return null;
+        return {
+          name,
+          url: `${origin}/${locale}/${slug}/`,
+          kind: "product" as const,
+        };
+      })
+      .filter(Boolean) as ScrapedCategoryItem[];
   }
 }

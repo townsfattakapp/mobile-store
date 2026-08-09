@@ -8,6 +8,8 @@ export type StorefrontProfile = {
   address_line: string;
   instagram_url: string;
   whatsapp_url: string;
+  /** Digits-only international number for product “Chat with Seller” (e.g. 919876543210) */
+  whatsapp_number: string;
   twitter_url: string;
   facebook_url: string;
   /** Official Instagram reel/post permalinks shown above the footer */
@@ -33,6 +35,7 @@ export const DEFAULT_STOREFRONT_PROFILE: StorefrontProfile = {
   address_line: "Old Bus Stop, Tiroda, Maharashtra 441911",
   instagram_url: "https://www.instagram.com/mahadevmobiletirora/",
   whatsapp_url: "https://chat.whatsapp.com/CFqzB24oVG004N7Haxtp2Q",
+  whatsapp_number: "",
   twitter_url: "",
   facebook_url: "",
   instagram_reels: [],
@@ -137,6 +140,7 @@ export function sanitizeStorefrontProfile(
       String(src.instagram_url || "").trim() || DEFAULT_STOREFRONT_PROFILE.instagram_url,
     whatsapp_url:
       String(src.whatsapp_url || "").trim() || DEFAULT_STOREFRONT_PROFILE.whatsapp_url,
+    whatsapp_number: String(src.whatsapp_number || "").trim(),
     twitter_url: String(src.twitter_url || "").trim(),
     facebook_url: String(src.facebook_url || "").trim(),
     instagram_reels: parseInstagramReelUrls(src.instagram_reels),

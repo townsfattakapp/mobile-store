@@ -1,6 +1,8 @@
 import { createClient } from "@/utils/supabase/server";
 import { notFound } from "next/navigation";
 import ProductClient from "./ProductClient";
+import { getStorefrontProfile } from "@/lib/store/profile";
+import { getSiteUrl } from "@/lib/seo/siteUrl";
 
 export const revalidate = 60; // SSR with ISR
 
@@ -10,9 +12,10 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
   
   const supabase = await createClient();
 
-  const { data: product, error } = await supabase
-    .from("products")
-    .select(`
+  const [{ data: product, error }, store] = await Promise.all([
+    supabase
+      .from("products")
+      .select(`
       id,
       name,
       slug,
@@ -51,8 +54,10 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
         inspected_at
       )
     `)
-    .eq("slug", slug)
-    .maybeSingle();
+      .eq("slug", slug)
+      .maybeSingle(),
+    getStorefrontProfile(),
+  ]);
 
   if (error || !product) {
     console.error("Product fetch error:", error);
@@ -68,6 +73,17 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
     master_devices: Array.isArray((product as any).master_devices)
       ? (product as any).master_devices[0] ?? null
       : (product as any).master_devices,
+    variants: ((product as any).variants || []).filter(
+      (v: { status?: boolean | null }) => v.status !== false
+    ),
+  };
+
+  const productUrl = `${getSiteUrl()}/product/${slug}`;
+  const sellerContact = {
+    name: store.brand_name,
+    phone: store.phone,
+    whatsapp_number: store.whatsapp_number,
+    whatsapp_url: store.whatsapp_url,
   };
 
   return (
@@ -82,7 +98,11 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
           <span className="font-medium text-black">{pageProduct.name}</span>
         </div>
 
-        <ProductClient initialProduct={pageProduct} />
+        <ProductClient
+          initialProduct={pageProduct}
+          sellerContact={sellerContact}
+          productUrl={productUrl}
+        />
         
         {/* Specifications Section */}
         {pageProduct.master_devices?.specifications && Object.keys(pageProduct.master_devices.specifications).length > 0 && (
@@ -155,13 +175,26 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                         "tags",
                         "model_sku",
                         "product_type",
+                        "source_url",
+                        "condition_source",
+                        "available_grades",
+                        "specs_enriched_from",
+                        "specs_source",
                       ].includes(key)
                     ) {
                       return false;
                     }
                     if (value == null || typeof value === "object") return false;
                     const s = String(value).trim();
-                    if (!s || /^see official website$/i.test(s) || s === "—") return false;
+                    if (
+                      !s ||
+                      /^see official website$/i.test(s) ||
+                      /^see specs$/i.test(s) ||
+                      /^n\/a$/i.test(s) ||
+                      s === "—"
+                    ) {
+                      return false;
+                    }
                     return true;
                   })
                   .map(([key, value]) => (

@@ -157,58 +157,12 @@ export async function autoFetchAndSaveMasterDevice(query: string) {
     // 1. Try to scrape data first from the brand websites (via proxy/skeleton)
     let fetchedData = await webScraperProvider.fetchFromExternalWebAPI(query);
     
-    // 2. Hybrid Enrichment: phone scrapes only — don't let MobileAPI overwrite accessories
+    // 2. Hybrid Enrichment: GSMArena-style specs via MobileAPI when scrape is weak
     if (fetchedData && fetchedData.model_name) {
-      const source = String((fetchedData as any).source_provider || "");
-      const productType = String((fetchedData.specifications as any)?.product_type || "");
-      const skipPhoneApi =
-        source.includes("shopify") ||
-        source.includes("samsung") ||
-        source.includes("nothing") ||
-        productType === "accessory" ||
-        /power\s*bank|charger|cable|earbuds|speaker|vacuum|mouse/i.test(
-          fetchedData.model_name
-        );
-
-      if (!skipPhoneApi) {
-      console.log(`Scraper succeeded for ${fetchedData.model_name}. Enriching with detailed API specs...`);
-      const scrapedSpecs = { ...(fetchedData.specifications as any) };
-      const scrapedVariants = fetchedData.variants ? [...fetchedData.variants] : [];
-      const hasSmartMatrix =
-        scrapedVariants.length > 1 ||
-        Array.isArray(scrapedSpecs.variant_pricing) ||
-        (scrapedSpecs.color_images && Object.keys(scrapedSpecs.color_images).length > 0);
-
-      const apiData = await autoFetchProvider.fetchFromExternalWebAPI(fetchedData.model_name);
-      
-      if (apiData && apiData.specifications) {
-         // Merge API tech specs under scraper commercial data (prices, images, matrix)
-         fetchedData.specifications = { ...apiData.specifications, ...scrapedSpecs };
-         
-         // Prefer clean API model naming when available
-         if (apiData.model_name) fetchedData.model_name = apiData.model_name;
-         if ((apiData as any).brand_name) (fetchedData as any).brand_name = (apiData as any).brand_name;
-         if (apiData.slug) fetchedData.slug = apiData.slug;
-
-         // If scraper grabbed a logo/favicon, prefer API product photo
-         const { isJunkBrandImage } = await import("@/lib/catalog/scraper/extractProductImages");
-         const scrapedImg = (fetchedData as any).main_image_url || "";
-         const apiImg = (apiData as any).main_image_url || "";
-         if ((!scrapedImg || isJunkBrandImage(scrapedImg)) && apiImg && !isJunkBrandImage(apiImg)) {
-           (fetchedData as any).main_image_url = apiImg;
-         }
-         if (apiImg) (fetchedData as any).api_image_url = apiImg;
-         
-         // Never replace a color×storage scrape matrix with weaker API variants
-         if (hasSmartMatrix) {
-            fetchedData.variants = scrapedVariants;
-         } else if (apiData.variants && apiData.variants.length > 0) {
-            fetchedData.variants = apiData.variants;
-         }
-      }
-      } else {
-        console.log(`Skipping phone API enrichment for accessory/shopify: ${fetchedData.model_name}`);
-      }
+      const { enrichFetchedDeviceWithGsmArenaSpecs } = await import(
+        "@/lib/catalog/enrichPhoneSpecs"
+      );
+      fetchedData = await enrichFetchedDeviceWithGsmArenaSpecs(fetchedData as any);
     } else {
       // 3. If scraper completely failed or blocked, fallback entirely to MobileAPI.dev
       console.log("Scraper failed or blocked. Falling back to MobileAPI.dev entirely...");
@@ -335,9 +289,97 @@ export async function autoFetchAndSaveMasterDevice(query: string) {
       }
     }
 
+    // Normalize laptop variants → CPU · RAM · SSD · display · color (not phone matrix)
+    {
+      const { isLaptopBlob, normalizeLaptopVariants } = await import(
+        "@/lib/catalog/laptopVariants"
+      );
+      const specs = (fetchedData.specifications || {}) as any;
+      if (
+        isLaptopBlob(
+          fetchedData.model_name,
+          specs.product_type,
+          specs.device_form,
+          (fetchedData as any).source_provider,
+          (fetchedData as any).brand_name
+        )
+      ) {
+        const normalized = normalizeLaptopVariants({
+          modelName: fetchedData.model_name,
+          specifications: specs,
+          variants: fetchedData.variants || [],
+        });
+        fetchedData.specifications = normalized.specifications;
+        fetchedData.variants = normalized.variants.map((v) => ({
+          id: v.id || "",
+          master_device_id: v.master_device_id || "",
+          ram: v.ram,
+          storage: v.storage,
+          color: v.color,
+          cpu: v.cpu,
+          display_size: v.display_size,
+          reference_image_url: v.reference_image_url,
+          mrp: v.mrp,
+          selling_price: v.selling_price,
+        })) as any;
+        (fetchedData as any).device_type = "laptop";
+      }
+    }
+
     // 2. Determine Brand
     // Use the brand_name provided by the provider, or default to parsing the query
     let brandName = (fetchedData as any).brand_name || fetchedData.model_name.split(' ')[0] || "Unknown";
+
+    // Skip re-import if this slug is already in Master Catalog (no duplicate clutter)
+    if (fetchedData.slug) {
+      const { data: existingMaster } = await supabase
+        .from("master_devices")
+        .select("id, model_name")
+        .eq("slug", fetchedData.slug)
+        .maybeSingle();
+      if (existingMaster) {
+        return {
+          success: true,
+          deviceId: existingMaster.id,
+          skipped: true,
+          message: `Already in Master Catalog (“${existingMaster.model_name}”). Opened existing entry — no duplicate created.`,
+        };
+      }
+    }
+
+    // Also block if a storefront product with same slug/name already exists
+    {
+      const { formatStoreProductName } = await import(
+        "@/lib/catalog/scraper/extractProductImages"
+      );
+      const cleaned = formatStoreProductName(fetchedData.model_name, brandName);
+      const candidateSlug =
+        fetchedData.slug ||
+        cleaned.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+
+      const { data: bySlug } = await supabase
+        .from("products")
+        .select("id, name, slug")
+        .eq("slug", candidateSlug)
+        .maybeSingle();
+      const { data: byName } = bySlug
+        ? { data: null }
+        : await supabase
+            .from("products")
+            .select("id, name, slug")
+            .ilike("name", cleaned)
+            .limit(1)
+            .maybeSingle();
+      const existingProduct = bySlug || byName;
+      if (existingProduct) {
+        return {
+          success: false,
+          duplicate: true,
+          existingProductId: existingProduct.id,
+          error: `Duplicate blocked: store already has “${existingProduct.name}”. Edit that product instead of importing again.`,
+        };
+      }
+    }
 
     // 3. Find or Create Brand in our DB
     let brandId = null;
@@ -442,6 +484,8 @@ export async function autoFetchAndSaveMasterDevice(query: string) {
                 color: v.color,
                 storage: v.storage,
                 ram: v.ram,
+                cpu: v.cpu || "",
+                display_size: v.display_size || "",
                 mrp: v.mrp,
                 selling_price: v.selling_price || v.mrp,
                 image: v.reference_image_url,
@@ -481,16 +525,29 @@ export async function autoFetchAndSaveMasterDevice(query: string) {
                 .delete()
                 .eq('master_device_id', existingDev.id);
 
-              const variantPayloads = variantsWithImages.map((v: any) => ({
+              const base = variantsWithImages.map((v: any) => ({
                 master_device_id: existingDev.id,
                 ram: v.ram,
                 storage: v.storage,
                 color: v.color,
                 reference_image_url: v.reference_image_url || finalImageUrl,
               }));
-              const { error: variantsErr } = await supabase
-                .from('master_device_variants')
-                .insert(variantPayloads);
+              const withLaptop = variantsWithImages.map((v: any, i: number) => ({
+                ...base[i],
+                cpu: v.cpu || null,
+                display_size: v.display_size || null,
+              }));
+              let { error: variantsErr } = await supabase
+                .from("master_device_variants")
+                .insert(withLaptop);
+              if (
+                variantsErr &&
+                /cpu|display_size|column/i.test(variantsErr.message || "")
+              ) {
+                ({ error: variantsErr } = await supabase
+                  .from("master_device_variants")
+                  .insert(base));
+              }
               if (variantsErr) throw new Error("Could not refresh variants: " + variantsErr.message);
             }
 
@@ -503,19 +560,29 @@ export async function autoFetchAndSaveMasterDevice(query: string) {
         throw new Error("Could not save master device: " + deviceErr.message);
     }
 
-    // 5. Save Master Variants (color × storage) with per-color images
+    // 5. Save Master Variants (phone color×storage OR laptop config matrix)
     if (variantsWithImages.length > 0) {
-        const variantPayloads = variantsWithImages.map((v: any) => ({
+        const base = variantsWithImages.map((v: any) => ({
             master_device_id: savedDevice.id,
             ram: v.ram,
             storage: v.storage,
             color: v.color,
             reference_image_url: v.reference_image_url || finalImageUrl
         }));
+        const withLaptop = variantsWithImages.map((v: any, i: number) => ({
+            ...base[i],
+            cpu: v.cpu || null,
+            display_size: v.display_size || null,
+        }));
 
-        const { error: variantsErr } = await supabase
+        let { error: variantsErr } = await supabase
             .from('master_device_variants')
-            .insert(variantPayloads);
+            .insert(withLaptop);
+        if (variantsErr && /cpu|display_size|column/i.test(variantsErr.message || "")) {
+          ({ error: variantsErr } = await supabase
+            .from("master_device_variants")
+            .insert(base));
+        }
             
         if (variantsErr) throw new Error("Could not save variants: " + variantsErr.message);
     }
@@ -567,6 +634,8 @@ export type ManualVariantInput = {
   color?: string;
   ram?: string;
   storage?: string;
+  cpu?: string;
+  display_size?: string;
   mrp: number;
   sellingPrice: number;
   stock: number;
@@ -718,6 +787,9 @@ export async function createManualProduct(input: ManualProductInput) {
       variantsUploaded.push({ ...v, imageUrl: vImg || undefined });
     }
 
+    const hasLaptopAxes = variants.some(
+      (v) => String(v.cpu || "").trim() || String(v.display_size || "").trim()
+    );
     const productPayload = {
       name,
       slug,
@@ -736,6 +808,13 @@ export async function createManualProduct(input: ManualProductInput) {
       specifications: {
         created_via: "manual_admin",
         storage: "cloudflare_r2",
+        ...(hasLaptopAxes
+          ? {
+              product_type: "laptop",
+              device_form: "laptop",
+              variant_schema: "laptop_config",
+            }
+          : {}),
       },
     };
 
@@ -763,14 +842,20 @@ export async function createManualProduct(input: ManualProductInput) {
 
     if (variantsUploaded.length > 0) {
       const shortId = String(product.id).replace(/-/g, "").slice(0, 8);
+      const { laptopVariantName } = await import("@/lib/catalog/laptopVariants");
       const rows = variantsUploaded.map((v, index) => {
         const color = String(v.color || "").trim();
         const ram = String(v.ram || "").trim();
         const storage = String(v.storage || "").trim();
-        const autoName = [ram, storage, color].filter(Boolean).join(" / ");
+        const cpu = String((v as any).cpu || "").trim();
+        const display_size = String((v as any).display_size || "").trim();
+        const isLaptop = Boolean(cpu || display_size);
+        const autoName = isLaptop
+          ? laptopVariantName({ cpu, ram, storage, display_size, color })
+          : [ram, storage, color].filter(Boolean).join(" / ");
         const variantName =
           String(v.name || "").trim() || autoName || `Variant ${index + 1}`;
-        const attrBits = [storage, ram, color]
+        const attrBits = [cpu, display_size, storage, ram, color]
           .filter(Boolean)
           .join("-")
           .toLowerCase()
@@ -790,6 +875,9 @@ export async function createManualProduct(input: ManualProductInput) {
             color: color || null,
             ram: ram || null,
             storage: storage || null,
+            cpu: cpu || null,
+            display_size: display_size || null,
+            device_form: isLaptop ? "laptop" : null,
           },
           status: true,
         };
@@ -827,6 +915,13 @@ export type PublishCatalogInput = {
   /** Editable storefront title (cleaned / customized before publish) */
   productName?: string;
   shortDescription?: string;
+  /** Optional subset of gallery/main image URLs chosen in the UI */
+  selectedImageUrls?: string[];
+  /**
+   * When a matching store product exists (same master/model + type):
+   * merge new variants into it (default true). Set false to always create a new listing.
+   */
+  mergeIfExists?: boolean;
   variants: Array<{
     masterVariantId: string;
     mrp: number;
@@ -897,6 +992,38 @@ export async function publishCatalogProduct(input: PublishCatalogInput) {
       };
     }
 
+    const { formatStoreProductName } = await import(
+      "@/lib/catalog/scraper/extractProductImages"
+    );
+    const {
+      findMergeTargetProduct,
+      variantIdentityKey,
+      mergeColorImageMaps,
+      mergeGalleryUrlLists,
+    } = await import("@/lib/catalog/publishMerge");
+
+    const { data: brandRow } = device.brand_id
+      ? await supabase
+          .from("brands")
+          .select("name")
+          .eq("id", device.brand_id)
+          .maybeSingle()
+      : { data: null };
+
+    const productName =
+      String(input.productName || "").trim() ||
+      formatStoreProductName(device.model_name, brandRow?.name);
+
+    const mergeIfExists = input.mergeIfExists !== false;
+    const existingProduct = mergeIfExists
+      ? await findMergeTargetProduct(supabase, {
+          masterDeviceId: device.id,
+          productType: input.productType,
+          brandId: device.brand_id,
+          candidateName: productName,
+        })
+      : null;
+
     const masterVariants: any[] = Array.isArray(device.master_device_variants)
       ? device.master_device_variants
       : [];
@@ -937,21 +1064,6 @@ export async function publishCatalogProduct(input: PublishCatalogInput) {
     }
 
     const specs = (device.specifications || {}) as Record<string, any>;
-    const { formatStoreProductName } = await import(
-      "@/lib/catalog/scraper/extractProductImages"
-    );
-    const { data: brandRow } = device.brand_id
-      ? await supabase
-          .from("brands")
-          .select("name")
-          .eq("id", device.brand_id)
-          .maybeSingle()
-      : { data: null };
-
-    const productName =
-      String(input.productName || "").trim() ||
-      formatStoreProductName(device.model_name, brandRow?.name);
-
     const basePrice = Math.min(...active.map((a) => a.conf.sellingPrice));
     const baseMrp = Math.min(
       ...active.map((a) =>
@@ -969,16 +1081,48 @@ export async function publishCatalogProduct(input: PublishCatalogInput) {
       IMAGE_LIMITS,
     } = await import("@/lib/storage/productImages");
 
+    const allGallery = Array.isArray(specs.gallery_images)
+      ? (specs.gallery_images as string[]).filter(Boolean)
+      : [];
+    const selected = (input.selectedImageUrls || [])
+      .map((u) => String(u || "").trim())
+      .filter(Boolean);
+    const selectedSet = new Set(selected);
+
+    // If admin picked images, only upload those; else keep auto-curated set
+    const galleryForPublish =
+      selected.length > 0
+        ? allGallery.filter((u) => selectedSet.has(u)).length
+          ? allGallery.filter((u) => selectedSet.has(u))
+          : selected
+        : allGallery;
+
+    const mainCandidate =
+      (selected.length > 0 ? selected[0] : "") ||
+      specs.main_image_url ||
+      galleryForPublish[0] ||
+      active.find((a) => a.mv.reference_image_url)?.mv.reference_image_url ||
+      "";
+
     const curated = curateSourceImages({
-      main:
-        specs.main_image_url ||
-        active.find((a) => a.mv.reference_image_url)?.mv.reference_image_url ||
-        "",
-      gallery: Array.isArray(specs.gallery_images) ? specs.gallery_images : [],
-      colorImages: specs.color_images || {},
+      main: mainCandidate,
+      gallery: galleryForPublish,
+      colorImages:
+        selected.length > 0
+          ? Object.fromEntries(
+              Object.entries((specs.color_images || {}) as Record<string, string>).filter(
+                ([, url]) => selectedSet.has(url)
+              )
+            )
+          : specs.color_images || {},
       variantImages: active.map(({ mv }) => ({
         color: mv.color,
-        url: mv.reference_image_url,
+        url:
+          selected.length === 0 ||
+          !mv.reference_image_url ||
+          selectedSet.has(mv.reference_image_url)
+            ? mv.reference_image_url
+            : mainCandidate,
       })),
     });
 
@@ -998,19 +1142,286 @@ export async function publishCatalogProduct(input: PublishCatalogInput) {
     }
 
     const mainImage = uploadedImages.main;
+    const { resolveColorImageUrl, expandColorImagesForVariants } = await import(
+      "@/lib/catalog/colorImages"
+    );
+    const activeColors = active.map(({ mv }) => String(mv.color || "")).filter(Boolean);
+    const expandedColors = expandColorImagesForVariants(
+      uploadedImages.colorImages || {},
+      activeColors
+    );
+    // Prefer expanded map on the product payload
+    uploadedImages.colorImages = {
+      ...uploadedImages.colorImages,
+      ...expandedColors,
+    };
+
     const mappedActive = active.map(({ conf, mv }) => {
       const colorKey = String(mv.color || "");
       const img =
+        resolveColorImageUrl(colorKey, uploadedImages.colorImages) ||
         uploadedImages.colorImages[colorKey] ||
-        Object.entries(uploadedImages.colorImages).find(
-          ([k]) => k.toLowerCase() === colorKey.toLowerCase()
-        )?.[1] ||
         mainImage;
       return { conf, mv: { ...mv, reference_image_url: img } };
     });
 
     const ts = Date.now();
-    const slugBase = slugify(productName || device.slug || device.model_name) || "device";
+
+    // —— MERGE into existing listing (new variants / price / stock updates) ——
+    if (existingProduct) {
+      const { data: existingVariants } = await supabase
+        .from("product_variants")
+        .select("id, name, attributes, stock_quantity, mrp, selling_price, image_url, status")
+        .eq("product_id", existingProduct.id);
+
+      const byKey = new Map<string, any>();
+      for (const ev of existingVariants || []) {
+        const attrs = (ev.attributes || {}) as Record<string, string>;
+        byKey.set(
+          variantIdentityKey({
+            master_variant_id: attrs.master_variant_id,
+            color: attrs.color,
+            ram: attrs.ram,
+            storage: attrs.storage,
+            cpu: attrs.cpu,
+            display_size: attrs.display_size,
+          }),
+          ev
+        );
+        // Also index by name attrs if master id missing on older rows
+        byKey.set(
+          variantIdentityKey({
+            color: attrs.color,
+            ram: attrs.ram,
+            storage: attrs.storage,
+            cpu: attrs.cpu,
+            display_size: attrs.display_size,
+          }),
+          ev
+        );
+      }
+
+      let updatedCount = 0;
+      let addedCount = 0;
+      const shortProduct = String(existingProduct.id)
+        .replace(/-/g, "")
+        .slice(0, 8);
+      const { laptopVariantName } = await import("@/lib/catalog/laptopVariants");
+      const isLaptopDevice =
+        String((device.specifications as any)?.device_form || "") === "laptop" ||
+        String((device.specifications as any)?.product_type || "") === "laptop";
+
+      for (const [index, { conf, mv }] of mappedActive.entries()) {
+        const cpu = String((mv as any).cpu || "").trim();
+        const display_size = String((mv as any).display_size || "").trim();
+        const isLaptop = isLaptopDevice || Boolean(cpu || display_size);
+        const colorSuffix = mv.color ? ` - ${mv.color}` : "";
+        const variantName = isLaptop
+          ? laptopVariantName({
+              cpu,
+              ram: mv.ram || "",
+              storage: mv.storage || "",
+              display_size,
+              color: mv.color || "",
+            })
+          : `${mv.ram || ""} / ${mv.storage || ""}${colorSuffix}`
+              .replace(/^ \/ | \/ $/g, "")
+              .trim();
+        const keyPrimary = variantIdentityKey({
+          master_variant_id: mv.id,
+          color: mv.color,
+          ram: mv.ram,
+          storage: mv.storage,
+          cpu,
+          display_size,
+        });
+        const keyAttrs = variantIdentityKey({
+          color: mv.color,
+          ram: mv.ram,
+          storage: mv.storage,
+          cpu,
+          display_size,
+        });
+        const hit = byKey.get(keyPrimary) || byKey.get(keyAttrs);
+
+        if (hit) {
+          const { error: upVarErr } = await supabase
+            .from("product_variants")
+            .update({
+              name: variantName || hit.name || "Standard",
+              mrp: conf.mrp || conf.sellingPrice,
+              selling_price: conf.sellingPrice,
+              stock_quantity: Math.max(0, Math.floor(conf.stock || 0)),
+              image_url: mv.reference_image_url || hit.image_url || mainImage,
+              status: true,
+              attributes: {
+                ...(hit.attributes || {}),
+                master_variant_id: mv.id,
+                color: mv.color,
+                ram: mv.ram,
+                storage: mv.storage,
+                cpu: cpu || null,
+                display_size: display_size || null,
+                device_form: isLaptop ? "laptop" : null,
+              },
+            })
+            .eq("id", hit.id);
+          if (upVarErr) {
+            return {
+              success: false,
+              error: `Could not update variant: ${upVarErr.message}`,
+              productId: existingProduct.id,
+            };
+          }
+          updatedCount++;
+        } else {
+          const attrBits = [cpu, display_size, mv.storage, mv.ram, mv.color]
+            .filter(Boolean)
+            .join("-")
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-|-$/g, "")
+            .slice(0, 40);
+          const { data: inserted, error: insErr } = await supabase
+            .from("product_variants")
+            .insert({
+              product_id: existingProduct.id,
+              sku: `VAR-${shortProduct}-${(existingVariants?.length || 0) + index + 1}-${attrBits || "std"}-${ts.toString(36)}`,
+              name: variantName || "Standard",
+              mrp: conf.mrp || conf.sellingPrice,
+              selling_price: conf.sellingPrice,
+              stock_quantity: Math.max(0, Math.floor(conf.stock || 0)),
+              image_url: mv.reference_image_url || mainImage || null,
+              attributes: {
+                master_variant_id: mv.id,
+                color: mv.color,
+                ram: mv.ram,
+                storage: mv.storage,
+                cpu: cpu || null,
+                display_size: display_size || null,
+                device_form: isLaptop ? "laptop" : null,
+              },
+              status: true,
+            })
+            .select("id")
+            .single();
+          if (insErr) {
+            return {
+              success: false,
+              error: `Could not add variant: ${insErr.message}`,
+              productId: existingProduct.id,
+            };
+          }
+          if (inserted) {
+            byKey.set(keyPrimary, inserted);
+            byKey.set(keyAttrs, inserted);
+          }
+          addedCount++;
+        }
+      }
+
+      // Refresh totals from all variants after merge
+      const { data: allVars } = await supabase
+        .from("product_variants")
+        .select("mrp, selling_price, stock_quantity, status")
+        .eq("product_id", existingProduct.id);
+
+      const live = (allVars || []).filter((v) => v.status !== false);
+      const mergeStock = live.reduce(
+        (s, v) => s + Math.max(0, Number(v.stock_quantity) || 0),
+        0
+      );
+      const prices = live
+        .map((v) => Number(v.selling_price) || 0)
+        .filter((p) => p > 0);
+      const mrps = live
+        .map((v) => Number(v.mrp) || 0)
+        .filter((p) => p > 0);
+
+      const prevSpecs =
+        (existingProduct.specifications as Record<string, any>) || {};
+      const mergedColors = mergeColorImageMaps(
+        prevSpecs.color_images,
+        uploadedImages.colorImages
+      );
+      const prevGallery = Array.isArray(prevSpecs.gallery_images)
+        ? prevSpecs.gallery_images
+        : [];
+      const { data: prevImgRows } = await supabase
+        .from("product_images")
+        .select("url")
+        .eq("product_id", existingProduct.id)
+        .order("sort_order", { ascending: true });
+      const fromRows = (prevImgRows || []).map((r) => r.url).filter(Boolean);
+      const mergedGallery = mergeGalleryUrlLists(
+        [...fromRows, ...prevGallery],
+        uploadedImages.gallery || [],
+        mainImage || existingProduct.main_image_url
+      ).slice(0, IMAGE_LIMITS.maxGallery);
+
+      await supabase
+        .from("products")
+        .update({
+          master_device_id: device.id,
+          category_id: input.categoryId || null,
+          tax_rate: Number(input.taxRate ?? 18) || 18,
+          mrp: mrps.length ? Math.min(...mrps) : existingProduct.mrp,
+          selling_price: prices.length
+            ? Math.min(...prices)
+            : existingProduct.selling_price,
+          stock_quantity: mergeStock,
+          status: "active",
+          main_image_url:
+            existingProduct.main_image_url || mainImage || null,
+          short_description:
+            String(input.shortDescription || "").trim() ||
+            existingProduct.name ||
+            productName,
+          specifications: {
+            ...prevSpecs,
+            from_master: true,
+            color_images: mergedColors,
+            gallery_images: mergedGallery,
+            storage: "cloudflare_r2",
+          },
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", existingProduct.id);
+
+      // Sync product_images to merged gallery (keep order)
+      await supabase
+        .from("product_images")
+        .delete()
+        .eq("product_id", existingProduct.id);
+      if (mergedGallery.length) {
+        await supabase.from("product_images").insert(
+          mergedGallery.map((url, i) => ({
+            product_id: existingProduct.id,
+            url,
+            alt_text: `${existingProduct.name} image ${i + 1}`,
+            sort_order: i,
+          }))
+        );
+      }
+
+      const parts: string[] = [];
+      if (addedCount) parts.push(`added ${addedCount} new variant${addedCount === 1 ? "" : "s"}`);
+      if (updatedCount) parts.push(`updated ${updatedCount}`);
+      if (!parts.length) parts.push("no variant changes");
+
+      return {
+        success: true,
+        merged: true,
+        productId: existingProduct.id,
+        addedVariants: addedCount,
+        updatedVariants: updatedCount,
+        message: `Updated existing “${existingProduct.name}” — ${parts.join(", ")}.`,
+      };
+    }
+
+    // —— CREATE new listing ——
+    const slugBase =
+      slugify(productName || device.slug || device.model_name) || "device";
 
     const productPayload = {
       name: productName,
@@ -1053,12 +1464,27 @@ export async function publishCatalogProduct(input: PublishCatalogInput) {
     }
 
     const shortProduct = String(product.id).replace(/-/g, "").slice(0, 8);
+    const { laptopVariantName } = await import("@/lib/catalog/laptopVariants");
     const variantPayloads = mappedActive.map(({ conf, mv }, index) => {
+      const cpu = String((mv as any).cpu || "").trim();
+      const display_size = String((mv as any).display_size || "").trim();
+      const isLaptop =
+        Boolean(cpu || display_size) ||
+        String((device.specifications as any)?.device_form || "") === "laptop" ||
+        String((device.specifications as any)?.product_type || "") === "laptop";
       const colorSuffix = mv.color ? ` - ${mv.color}` : "";
-      const variantName = `${mv.ram || ""} / ${mv.storage || ""}${colorSuffix}`
-        .replace(/^ \/ | \/ $/g, "")
-        .trim();
-      const attrBits = [mv.storage, mv.ram, mv.color]
+      const variantName = isLaptop
+        ? laptopVariantName({
+            cpu,
+            ram: mv.ram || "",
+            storage: mv.storage || "",
+            display_size,
+            color: mv.color || "",
+          })
+        : `${mv.ram || ""} / ${mv.storage || ""}${colorSuffix}`
+            .replace(/^ \/ | \/ $/g, "")
+            .trim();
+      const attrBits = [cpu, display_size, mv.storage, mv.ram, mv.color]
         .filter(Boolean)
         .join("-")
         .toLowerCase()
@@ -1079,6 +1505,9 @@ export async function publishCatalogProduct(input: PublishCatalogInput) {
           color: mv.color,
           ram: mv.ram,
           storage: mv.storage,
+          cpu: cpu || null,
+          display_size: display_size || null,
+          device_form: isLaptop ? "laptop" : null,
         },
         status: true,
       };
@@ -1109,6 +1538,7 @@ export async function publishCatalogProduct(input: PublishCatalogInput) {
 
     return {
       success: true,
+      merged: false,
       productId: product.id,
       message: `Published “${productName}” to store`,
     };

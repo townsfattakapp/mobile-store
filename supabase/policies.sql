@@ -18,6 +18,37 @@ ALTER TABLE carts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cart_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inventory_movements ENABLE ROW LEVEL SECURITY;
 
+-- Helper roles (SECURITY DEFINER avoids infinite recursion when policies
+-- on profiles need to read profiles for admin/staff checks)
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid() AND role = 'admin'
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION public.is_staff_or_admin()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid() AND role IN ('admin', 'staff')
+  );
+$$;
+
+GRANT EXECUTE ON FUNCTION public.is_admin() TO authenticated, anon;
+GRANT EXECUTE ON FUNCTION public.is_staff_or_admin() TO authenticated, anon;
+
 -- 1. Profiles
 -- Users can read and update their own profile. Admins can read all.
 CREATE POLICY "Users can view own profile" ON profiles
@@ -27,19 +58,10 @@ CREATE POLICY "Users can update own profile" ON profiles
     FOR UPDATE USING (auth.uid() = id);
 
 CREATE POLICY "Admins can view all profiles" ON profiles
-    FOR ALL USING (
-        EXISTS (
-            SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin'
-        )
-    );
+    FOR ALL USING (public.is_admin());
 
 CREATE POLICY "Staff can manage profiles" ON profiles
-    FOR ALL USING (
-        EXISTS (
-            SELECT 1 FROM profiles p
-            WHERE p.id = auth.uid() AND p.role IN ('admin', 'staff')
-        )
-    );
+    FOR ALL USING (public.is_staff_or_admin());
 
 -- 2. Public Catalog Data (Categories, Brands, Products, Variants)
 -- Public can only select active data. Admins have full access.
@@ -153,3 +175,24 @@ CREATE POLICY "Admin can view inventory movements" ON inventory_movements
     FOR SELECT USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND (role = 'admin' OR role = 'staff')));
 CREATE POLICY "Admin can insert inventory movements" ON inventory_movements
     FOR INSERT WITH CHECK (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND (role = 'admin' OR role = 'staff')));
+
+-- 7. Master catalog (scraped / manual devices used by admin product flow)
+ALTER TABLE master_devices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE master_device_variants ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Public can view master devices" ON master_devices;
+DROP POLICY IF EXISTS "Admin can manage master devices" ON master_devices;
+DROP POLICY IF EXISTS "Public can view master variants" ON master_device_variants;
+DROP POLICY IF EXISTS "Admin can manage master variants" ON master_device_variants;
+
+CREATE POLICY "Public can view master devices" ON master_devices
+    FOR SELECT USING (true);
+CREATE POLICY "Admin can manage master devices" ON master_devices
+    FOR ALL USING (public.is_staff_or_admin())
+    WITH CHECK (public.is_staff_or_admin());
+
+CREATE POLICY "Public can view master variants" ON master_device_variants
+    FOR SELECT USING (true);
+CREATE POLICY "Admin can manage master variants" ON master_device_variants
+    FOR ALL USING (public.is_staff_or_admin())
+    WITH CHECK (public.is_staff_or_admin());

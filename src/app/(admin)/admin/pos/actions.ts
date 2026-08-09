@@ -14,7 +14,7 @@ export async function searchPosProducts(query: string) {
     .from("products")
     .select(`
       id, name, sku, mrp, selling_price, stock_quantity,
-      variants:product_variants(id, name, sku, mrp, selling_price, stock_quantity, attributes)
+      variants:product_variants(id, name, sku, mrp, selling_price, stock_quantity, attributes, status)
     `)
     .or(`name.ilike.%${q}%,sku.ilike.%${q}%`)
     .eq("status", "active")
@@ -30,6 +30,7 @@ export async function searchPosProducts(query: string) {
   for (const p of data || []) {
     if (p.variants && p.variants.length > 0) {
       for (const v of p.variants) {
+        if (v.status === false) continue;
         if (v.stock_quantity > 0) {
           const color = v.attributes?.color || "";
           const storage = v.attributes?.storage || "";

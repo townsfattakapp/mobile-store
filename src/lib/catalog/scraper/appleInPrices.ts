@@ -157,7 +157,7 @@ export function appleBuyUrlFromProductUrl(url: string, modelName?: string): stri
         .pop()
         ?.replace(/\/$/, "") || "";
 
-    if (!slug || slug === "iphone" || slug === "buy-iphone") {
+    if (!slug || /^(iphone|mac|ipad|watch|buy-iphone|buy-mac|buy-ipad|buy-watch)$/i.test(slug)) {
       slug = (modelName || "")
         .toLowerCase()
         .replace(/apple\s+/g, "")
@@ -165,13 +165,29 @@ export function appleBuyUrlFromProductUrl(url: string, modelName?: string): stri
         .replace(/^-|-$/g, "");
     }
 
-    // /shop/buy-iphone/iphone-17 already
-    if (u.pathname.includes("/shop/buy-iphone/")) {
+    // Already on a shop buy URL
+    if (/\/shop\/buy-(iphone|mac|ipad|watch)\//i.test(u.pathname)) {
       return `${u.protocol}//${u.host}${u.pathname.replace(/\/$/, "")}`;
     }
 
-    if (!slug.startsWith("iphone")) return null;
-    return `${u.protocol}//${u.host}/${locale}/shop/buy-iphone/${slug}`;
+    if (!slug) return null;
+
+    if (/^iphone/.test(slug)) {
+      return `${u.protocol}//${u.host}/${locale}/shop/buy-iphone/${slug}`;
+    }
+    if (
+      /^(macbook|imac|mac-mini|mac-studio|mac-pro|studio-display)/.test(slug)
+    ) {
+      return `${u.protocol}//${u.host}/${locale}/shop/buy-mac/${slug}`;
+    }
+    if (/^ipad/.test(slug)) {
+      return `${u.protocol}//${u.host}/${locale}/shop/buy-ipad/${slug}`;
+    }
+    if (/^(apple-watch|watch)/.test(slug)) {
+      const watchSlug = slug.replace(/^watch-/, "apple-watch-");
+      return `${u.protocol}//${u.host}/${locale}/shop/buy-watch/${watchSlug}`;
+    }
+    return null;
   } catch {
     return null;
   }
@@ -193,7 +209,8 @@ export function parseAppleShopPrices(html: string): {
     let m: RegExpExecArray | null;
     while ((m = re.exec(html)) !== null) {
       const n = Math.round(parseFloat(m[1].replace(/,/g, "")));
-      if (Number.isFinite(n) && n >= 40000 && n <= 300000) amounts.push(n);
+      // Mac/iPhone full configs; skip EMI / accessory noise under 40k
+      if (Number.isFinite(n) && n >= 40000 && n <= 500000) amounts.push(n);
     }
   }
   if (!amounts.length) return { mrp: null, sellingPrice: null };
@@ -519,9 +536,11 @@ export function buildAppleVariants(opts: {
     storages,
     ram,
     variants,
-    startingMrp: variants.length
-      ? Math.min(...variants.map((v) => v.mrp).filter(Boolean))
-      : lookupAppleIndiaMrp(opts.modelName),
+    startingMrp: (() => {
+      const priced = variants.map((v) => v.mrp).filter((n) => Number.isFinite(n) && n > 0);
+      if (priced.length) return Math.min(...priced);
+      return lookupAppleIndiaMrp(opts.modelName) || 0;
+    })(),
   };
 }
 

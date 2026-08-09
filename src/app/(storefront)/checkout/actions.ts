@@ -2,6 +2,7 @@
 
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
+import { notifyOwnerOfOrder } from "@/lib/notify/notifyOwner";
 
 export async function placeOrder(formData: any, cartItems: any[], subtotal: number) {
   const supabase = await createClient();
@@ -16,10 +17,10 @@ export async function placeOrder(formData: any, cartItems: any[], subtotal: numb
       if (item.variantId) {
         const { data: v } = await supabase
           .from("product_variants")
-          .select("stock_quantity")
+          .select("stock_quantity, status")
           .eq("id", item.variantId)
           .single();
-        if (!v || v.stock_quantity < item.quantity) {
+        if (!v || v.status === false || v.stock_quantity < item.quantity) {
           return { error: `Item ${item.name} is out of stock or insufficient quantity.` };
         }
       } else {
@@ -189,6 +190,34 @@ export async function placeOrder(formData: any, cartItems: any[], subtotal: numb
         }
       }
     }
+
+    // Owner alerts — errors are swallowed inside notifyOwnerOfOrder
+    await notifyOwnerOfOrder({
+      event: "order_created",
+      orderId: order.id,
+      orderNumber: order.order_number,
+      paymentMethod: String(paymentMethod),
+      paymentStatus: "pending",
+      status: "pending",
+      grandTotal: orderPayload.grand_total,
+      shippingCharge: shipping,
+      subtotal,
+      customer: {
+        full_name: String(formData.get("fullName") || "") || null,
+        mobile_number: String(formData.get("phone") || "") || null,
+        email: String(formData.get("email") || "") || null,
+        address_line: String(formData.get("address") || "") || null,
+        city: String(formData.get("city") || "") || null,
+        state: String(formData.get("state") || "") || null,
+        pin_code: String(formData.get("pinCode") || "") || null,
+      },
+      items: cartItems.map((item) => ({
+        product_name: String(item.name || "Item"),
+        variant_name: item.variantName || null,
+        quantity: Number(item.quantity) || 0,
+        unit_price: Number(item.price) || 0,
+      })),
+    });
 
     return {
       success: true,

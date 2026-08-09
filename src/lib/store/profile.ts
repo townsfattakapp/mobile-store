@@ -43,12 +43,12 @@ async function readContactFromDb(): Promise<Partial<StorefrontProfile>> {
     const { data, error } = await supabase
       .from("store_settings")
       .select(
-        "phone, email, website, trade_name, legal_name, brand_name, tagline, business_hours, designed_by_name, designed_by_org, designed_by_url, seo_title, seo_description, hero_eyebrow, hero_headline, hero_subcopy, instagram_url, twitter_url, facebook_url"
+        "phone, email, website, trade_name, legal_name, brand_name, tagline, business_hours, designed_by_name, designed_by_org, designed_by_url, seo_title, seo_description, hero_eyebrow, hero_headline, hero_subcopy, instagram_url, whatsapp_url, whatsapp_number, twitter_url, facebook_url"
       )
       .limit(1)
       .maybeSingle();
     if (error || !data) {
-      // Fallback if branding columns aren't migrated yet
+      // Fallback if branding / whatsapp columns aren't migrated yet
       const fallback = await supabase
         .from("store_settings")
         .select("phone, email, website, trade_name, legal_name")
@@ -78,6 +78,8 @@ async function readContactFromDb(): Promise<Partial<StorefrontProfile>> {
       hero_headline: (data as any).hero_headline || undefined,
       hero_subcopy: (data as any).hero_subcopy || undefined,
       instagram_url: (data as any).instagram_url || undefined,
+      whatsapp_url: (data as any).whatsapp_url || undefined,
+      whatsapp_number: (data as any).whatsapp_number || undefined,
       twitter_url: (data as any).twitter_url || undefined,
       facebook_url: (data as any).facebook_url || undefined,
     };
@@ -95,6 +97,8 @@ export async function getStorefrontProfile(): Promise<StorefrontProfile> {
     phone: fromR2?.phone || fromDb.phone,
     email: fromR2?.email || fromDb.email,
     website: fromR2?.website || fromDb.website,
+    whatsapp_number: fromR2?.whatsapp_number || fromDb.whatsapp_number,
+    whatsapp_url: fromR2?.whatsapp_url || fromDb.whatsapp_url,
   });
 }
 

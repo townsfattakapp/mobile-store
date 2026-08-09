@@ -38,6 +38,8 @@ export type StoreSettings = {
   address_line?: string | null;
   instagram_url?: string | null;
   whatsapp_url?: string | null;
+  /** Digits-only international WhatsApp for product chat (e.g. 919876543210) */
+  whatsapp_number?: string | null;
   /** Newline-separated Instagram reel URLs (admin textarea) */
   instagram_reels?: string | string[] | null;
   twitter_url?: string | null;
@@ -176,6 +178,7 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   address_line: "Old Bus Stop, Tiroda, Maharashtra 441911",
   instagram_url: "https://www.instagram.com/mahadevmobiletirora/",
   whatsapp_url: "https://chat.whatsapp.com/CFqzB24oVG004N7Haxtp2Q",
+  whatsapp_number: null,
   instagram_reels: [],
   twitter_url: null,
   facebook_url: null,

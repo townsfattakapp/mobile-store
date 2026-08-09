@@ -8,6 +8,7 @@ import { INDIAN_STATES } from "@/lib/invoice/gst";
 import { DEFAULT_STORE_SETTINGS, type StoreSettings } from "@/lib/invoice/types";
 import { getStoreSettings, saveStoreSettings } from "../invoices/actions";
 import { getStorefrontProfileAction } from "./actions";
+import { OrderPushEnableCard } from "@/components/admin/OrderPushEnableCard";
 
 export default function AdminSettingsPage() {
   const [form, setForm] = useState<StoreSettings>({ ...DEFAULT_STORE_SETTINGS });
@@ -34,6 +35,7 @@ export default function AdminSettingsPage() {
         pin_code: s.pin_code || "441911",
         instagram_url: profile.instagram_url,
         whatsapp_url: profile.whatsapp_url,
+        whatsapp_number: profile.whatsapp_number || s.whatsapp_number || "",
         instagram_reels: (profile.instagram_reels || []).join("\n"),
         twitter_url: profile.twitter_url,
         facebook_url: profile.facebook_url,
@@ -169,6 +171,17 @@ export default function AdminSettingsPage() {
               onChange={(e) => set("phone", e.target.value)}
             />
             <Input
+              label="WhatsApp number (product chat)"
+              value={form.whatsapp_number || ""}
+              onChange={(e) => set("whatsapp_number", e.target.value)}
+              placeholder="9876543210 or 919876543210"
+            />
+            <p className="md:col-span-2 text-xs text-[#6e6e73] -mt-2">
+              Used for “Chat with Seller” on product pages. Saved as digits with country code
+              (India: 91XXXXXXXXXX). Leave blank to fall back to the public phone number.
+              Separate from the WhatsApp community URL below.
+            </p>
+            <Input
               label="Public email"
               type="email"
               value={form.email || ""}
@@ -199,7 +212,7 @@ export default function AdminSettingsPage() {
               placeholder="https://www.instagram.com/..."
             />
             <Input
-              label="WhatsApp URL"
+              label="WhatsApp community / group URL"
               value={form.whatsapp_url || ""}
               onChange={(e) => set("whatsapp_url", e.target.value)}
               placeholder="https://chat.whatsapp.com/..."
@@ -229,6 +242,34 @@ export default function AdminSettingsPage() {
                 — not the profile page URL (that cannot be embedded).
               </p>
             </div>
+          </div>
+        </section>
+
+        {/* Instant order alerts */}
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-lg font-semibold border-b pb-2">Order notifications</h2>
+            <p className="text-xs text-[#6e6e73] mt-2">
+              Get alerted when a customer places an order on the website, and again when online
+              payment is confirmed. Keep your public email and WhatsApp number filled above.
+              Email uses Resend; WhatsApp uses CallMeBot; browser push uses this device.
+            </p>
+          </div>
+          <OrderPushEnableCard />
+          <div className="rounded-xl border bg-neutral-50 p-4 text-xs text-[#6e6e73] space-y-1">
+            <p>
+              <strong className="text-[#1d1d1f]">Email:</strong> set Public email above + server{" "}
+              <code className="bg-white px-1 rounded">RESEND_API_KEY</code>
+            </p>
+            <p>
+              <strong className="text-[#1d1d1f]">WhatsApp:</strong> activate CallMeBot on the store
+              WhatsApp number, then set{" "}
+              <code className="bg-white px-1 rounded">CALLMEBOT_API_KEY</code>
+            </p>
+            <p>
+              <strong className="text-[#1d1d1f]">Browser push:</strong> enable on this phone after
+              VAPID keys are configured on the server.
+            </p>
           </div>
         </section>
 

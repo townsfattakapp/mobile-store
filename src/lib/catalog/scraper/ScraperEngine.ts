@@ -2,6 +2,7 @@ import { MasterDevice } from "../CatalogProvider";
 import { AmazonAdapter } from "./adapters/AmazonAdapter";
 import { FlipkartAdapter } from "./adapters/FlipkartAdapter";
 import { AppleAdapter } from "./adapters/AppleAdapter";
+import { RefitGlobalAdapter } from "./adapters/RefitGlobalAdapter";
 import { GenericBrandAdapter } from "./adapters/GenericBrandAdapter";
 
 export interface ScraperAdapter {
@@ -14,6 +15,7 @@ export class ScraperEngine {
     new AmazonAdapter(),
     new FlipkartAdapter(),
     new AppleAdapter(),
+    new RefitGlobalAdapter(),
     new GenericBrandAdapter(), // Catch-all last
   ];
 
@@ -34,10 +36,14 @@ export class ScraperEngine {
       isSamsung &&
       (/[?&]smc=/i.test(url) ||
         /[?&]modelcode=/i.test(url) ||
-        /-(sm-?[a-z0-9]{6,})\b/i.test(lowerUrl));
+        /-(sm-?[a-z0-9]{6,})\b/i.test(lowerUrl) ||
+        /-(np[0-9a-z]+(?:-[a-z0-9]+)?)\b/i.test(lowerUrl));
+    const isOemBlockedLikely =
+      /dell\.com|acer\.com|store\.acer\.com/i.test(lowerUrl);
 
     // Samsung SKU / ?smc= links: Search API first (HTML often 404 or useless)
-    if (hasSamsungModelHint) {
+    // Galaxy Book (NP…) still needs PDP HTML for JSON-LD prices — don't short-circuit
+    if (hasSamsungModelHint && !/-(np[0-9a-z]+)/i.test(lowerUrl)) {
       try {
         const apiOnly = await adapter.scrape(url, "");
         if (apiOnly?.model_name) return apiOnly;
@@ -94,6 +100,16 @@ export class ScraperEngine {
       }
     }
 
+    // Refit Global: Shopify JSON only (HTML is huge / unhelpful)
+    if (lowerUrl.includes("refitglobal.com") && /\/products\//i.test(lowerUrl)) {
+      try {
+        const apiOnly = await adapter.scrape(url, "");
+        if (apiOnly?.model_name) return apiOnly;
+      } catch (e) {
+        console.warn("Refit Global scrape failed", e);
+      }
+    }
+
     try {
       const response = await fetch(url, {
         headers: {
@@ -108,7 +124,16 @@ export class ScraperEngine {
 
       if (!response.ok) {
         console.error(`Failed to fetch ${url}. Status: ${response.status}`);
-        if (lowerUrl.includes("/products/") || isSamsung || isNothing || isOnePlus) {
+        if (
+          lowerUrl.includes("/products/") ||
+          isSamsung ||
+          isNothing ||
+          isOnePlus ||
+          isOemBlockedLikely ||
+          /hp\.com|lenovo\.com|asus\.com|belkin\.com|syska\.co\.in|anker\.com/i.test(
+            lowerUrl
+          )
+        ) {
           return await adapter.scrape(url, "");
         }
         return null;
@@ -119,13 +144,22 @@ export class ScraperEngine {
       if (scraped?.model_name) return scraped;
 
       // Samsung family pages without ProductGroup: last-chance API resolve
-      if (isSamsung || isNothing || isOnePlus) {
+      if (isSamsung || isNothing || isOnePlus || isOemBlockedLikely) {
         return await adapter.scrape(url, "");
       }
       return scraped;
     } catch (error) {
       console.error(`ScraperEngine error on ${url}:`, error);
-      if (lowerUrl.includes("/products/") || isSamsung || isNothing || isOnePlus) {
+      if (
+        lowerUrl.includes("/products/") ||
+        isSamsung ||
+        isNothing ||
+        isOnePlus ||
+        isOemBlockedLikely ||
+        /hp\.com|lenovo\.com|asus\.com|belkin\.com|syska\.co\.in|anker\.com/i.test(
+          lowerUrl
+        )
+      ) {
         try {
           return await adapter.scrape(url, "");
         } catch (e2) {

@@ -1,13 +1,51 @@
 "use client";
 
-import React, { useEffect, useState, use } from "react";
+import React, { useEffect, useMemo, useState, use } from "react";
 import { createClient } from "@/utils/supabase/client";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { ArrowLeft, Save, Plus, Trash2, ShieldAlert } from "lucide-react";
 import Link from "next/link";
+import {
+  ProductImagesPanel,
+  type ProductImageRow,
+} from "../ProductImagesPanel";
+import {
+  ProductSpecsPanel,
+  HIGHLIGHT_KEYS,
+  type SpecSection,
+} from "../ProductSpecsPanel";
+import {
+  refreshMasterDeviceSpecs,
+  saveMasterDeviceSpecs,
+} from "../specActions";
 
 type CategoryOption = { id: string; name: string; active: boolean };
+
+function masterSpecsFromRow(specs: Record<string, unknown> | null | undefined) {
+  const s = specs || {};
+  const highlights: Record<string, string> = {};
+  for (const k of HIGHLIGHT_KEYS) {
+    highlights[k] = String(s[k] || "");
+  }
+  const sections = Array.isArray(s.spec_sections)
+    ? (s.spec_sections as SpecSection[]).map((sec) => ({
+        title: String(sec?.title || ""),
+        items: Array.isArray(sec?.items)
+          ? sec.items.map((row) => ({
+              name: String(row?.name || ""),
+              value: String(row?.value || ""),
+            }))
+          : [],
+      }))
+    : [];
+  return {
+    highlights,
+    description: String(s.description || ""),
+    sections,
+    raw: { ...s },
+  };
+}
 
 export default function EditProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -22,6 +60,15 @@ export default function EditProductPage({ params }: { params: Promise<{ id: stri
   const [variants, setVariants] = useState<any[]>([]);
   const [inspection, setInspection] = useState<any>({});
   const [categories, setCategories] = useState<CategoryOption[]>([]);
+  const [galleryImages, setGalleryImages] = useState<ProductImageRow[]>([]);
+  const [colorImages, setColorImages] = useState<Record<string, string>>({});
+  const [mainImageUrl, setMainImageUrl] = useState("");
+  const [masterDeviceId, setMasterDeviceId] = useState<string | null>(null);
+  const [masterSpecsRaw, setMasterSpecsRaw] = useState<Record<string, unknown>>({});
+  const [specHighlights, setSpecHighlights] = useState<Record<string, string>>({});
+  const [specDescription, setSpecDescription] = useState("");
+  const [specSections, setSpecSections] = useState<SpecSection[]>([]);
+  const [refreshingSpecs, setRefreshingSpecs] = useState(false);
   
   useEffect(() => {
     fetchProductData();
@@ -30,7 +77,11 @@ export default function EditProductPage({ params }: { params: Promise<{ id: stri
   const fetchProductData = async () => {
     setLoading(true);
     const [{ data: pData }, { data: catData }] = await Promise.all([
-      supabase.from("products").select("*, master_devices(model_name)").eq("id", id).single(),
+      supabase
+        .from("products")
+        .select("*, master_devices(id, model_name, specifications)")
+        .eq("id", id)
+        .single(),
       supabase
         .from("categories")
         .select("id, name, active")
@@ -41,6 +92,65 @@ export default function EditProductPage({ params }: { params: Promise<{ id: stri
 
     if (pData) {
       setProduct(pData);
+      setMainImageUrl(pData.main_image_url || "");
+      const specs = (pData.specifications || {}) as Record<string, unknown>;
+      const fromSpecsGallery = Array.isArray(specs.gallery_images)
+        ? (specs.gallery_images as string[]).filter(Boolean)
+        : [];
+      const fromSpecsColors =
+        specs.color_images && typeof specs.color_images === "object"
+          ? (specs.color_images as Record<string, string>)
+          : {};
+      setColorImages(fromSpecsColors);
+
+      const master = Array.isArray((pData as any).master_devices)
+        ? (pData as any).master_devices[0]
+        : (pData as any).master_devices;
+      if (master?.id) {
+        setMasterDeviceId(master.id);
+        const parsed = masterSpecsFromRow(master.specifications);
+        setMasterSpecsRaw(parsed.raw);
+        setSpecHighlights(parsed.highlights);
+        setSpecDescription(parsed.description);
+        setSpecSections(parsed.sections);
+      } else {
+        setMasterDeviceId(pData.master_device_id || null);
+        setMasterSpecsRaw({});
+        setSpecHighlights({});
+        setSpecDescription("");
+        setSpecSections([]);
+      }
+
+      const { data: imgRows } = await supabase
+        .from("product_images")
+        .select("id, url, alt_text, sort_order")
+        .eq("product_id", id)
+        .order("sort_order", { ascending: true });
+
+      if (imgRows && imgRows.length > 0) {
+        setGalleryImages(imgRows);
+        if (!pData.main_image_url && imgRows[0]?.url) {
+          setMainImageUrl(imgRows[0].url);
+        }
+      } else if (fromSpecsGallery.length > 0) {
+        setGalleryImages(
+          fromSpecsGallery.map((url, i) => ({
+            url,
+            sort_order: i,
+            alt_text: `Image ${i + 1}`,
+          }))
+        );
+      } else if (pData.main_image_url) {
+        setGalleryImages([
+          {
+            url: pData.main_image_url,
+            sort_order: 0,
+            alt_text: "Main image",
+          },
+        ]);
+      } else {
+        setGalleryImages([]);
+      }
       
       const { data: vData } = await supabase.from("product_variants").select("*").eq("product_id", id);
       if (vData) setVariants(vData);
@@ -52,6 +162,31 @@ export default function EditProductPage({ params }: { params: Promise<{ id: stri
     }
     setLoading(false);
   };
+
+  const variantColors = useMemo(
+    () =>
+      [
+        ...new Set(
+          variants
+            .map((v) => String(v.attributes?.color || "").trim())
+            .filter(Boolean)
+        ),
+      ],
+    [variants]
+  );
+
+  const enabledVariantColors = useMemo(
+    () =>
+      [
+        ...new Set(
+          variants
+            .filter((v) => v.status !== false)
+            .map((v) => String(v.attributes?.color || "").trim())
+            .filter(Boolean)
+        ),
+      ],
+    [variants]
+  );
 
   const handleProductChange = (e: any) => {
     const { name, value } = e.target;
@@ -105,10 +240,18 @@ export default function EditProductPage({ params }: { params: Promise<{ id: stri
     
     // Save Product
     // Filter out any empty offers before saving
-    let finalSpecs = product.specifications || {};
-    if (finalSpecs.offers) {
-      finalSpecs.offers = finalSpecs.offers.filter((o: string) => o.trim() !== "");
+    let finalSpecs = { ...(product.specifications || {}) } as Record<string, unknown>;
+    if (Array.isArray(finalSpecs.offers)) {
+      finalSpecs.offers = (finalSpecs.offers as string[]).filter((o) => o.trim() !== "");
     }
+    finalSpecs.color_images = colorImages;
+    finalSpecs.gallery_images = galleryImages.map((g) => g.url).filter(Boolean);
+
+    const nextMain =
+      mainImageUrl ||
+      galleryImages[0]?.url ||
+      product.main_image_url ||
+      null;
 
     const { error: pErr } = await supabase.from("products").update({
       mrp: product.mrp,
@@ -117,17 +260,50 @@ export default function EditProductPage({ params }: { params: Promise<{ id: stri
       status: product.status,
       short_description: product.short_description,
       category_id: product.category_id || null,
+      main_image_url: nextMain,
       specifications: finalSpecs,
       updated_at: new Date().toISOString(),
     }).eq("id", id);
 
-    // Save Variants
+    // Sync gallery rows
+    await supabase.from("product_images").delete().eq("product_id", id);
+    const galleryRows = galleryImages
+      .map((g, i) => ({
+        product_id: id,
+        url: g.url,
+        alt_text: g.alt_text || `${product.name} image ${i + 1}`,
+        sort_order: i,
+      }))
+      .filter((r) => r.url);
+    if (galleryRows.length > 0) {
+      const { error: imgErr } = await supabase
+        .from("product_images")
+        .insert(galleryRows);
+      if (imgErr && !pErr) {
+        setSaving(false);
+        setSaveError(imgErr.message);
+        return;
+      }
+    }
+
+    // Save Variants — refresh image_url from color map when present
     for (const v of variants) {
+      const color = String(v.attributes?.color || "").trim();
+      const mapped =
+        (color && colorImages[color]) ||
+        (color &&
+          Object.entries(colorImages).find(
+            ([k]) => k.toLowerCase() === color.toLowerCase()
+          )?.[1]) ||
+        v.image_url ||
+        null;
       await supabase.from("product_variants").update({
         mrp: v.mrp,
         selling_price: v.selling_price,
         stock_quantity: v.stock_quantity,
-        name: v.name
+        name: v.name,
+        status: v.status !== false,
+        image_url: mapped,
       }).eq("id", v.id);
     }
 
@@ -142,9 +318,79 @@ export default function EditProductPage({ params }: { params: Promise<{ id: stri
       }
     }
 
+    // Persist technical specs on master catalog (storefront reads from here)
+    if (masterDeviceId) {
+      const nextMasterSpecs: Record<string, unknown> = {
+        ...masterSpecsRaw,
+        ...specHighlights,
+        description: specDescription,
+        spec_sections: specSections
+          .filter((s) => s.title.trim())
+          .map((s) => ({
+            title: s.title.trim(),
+            items: s.items.filter(
+              (r) => r.name.trim() || r.value.trim()
+            ),
+          })),
+      };
+      // Rebuild flat tech_specs for fallbacks
+      const tech: Record<string, string> = {};
+      for (const sec of nextMasterSpecs.spec_sections as SpecSection[]) {
+        for (const row of sec.items) {
+          if (row.name && row.value) {
+            tech[`${sec.title} · ${row.name}`] = row.value;
+          }
+        }
+      }
+      nextMasterSpecs.tech_specs = tech;
+      delete nextMasterSpecs.source_url;
+      delete nextMasterSpecs.condition_source;
+
+      const specSave = await saveMasterDeviceSpecs(masterDeviceId, nextMasterSpecs);
+      if (!specSave.success) {
+        setSaving(false);
+        setSaveError(specSave.error || "Could not save technical specs");
+        return;
+      }
+      setMasterSpecsRaw(nextMasterSpecs);
+    }
+
     setSaving(false);
     if (pErr) setSaveError(pErr.message);
-    else setSaveOk(true);
+    else {
+      setSaveOk(true);
+      setProduct((prev: any) =>
+        prev
+          ? {
+              ...prev,
+              main_image_url: nextMain,
+              specifications: finalSpecs,
+            }
+          : prev
+      );
+    }
+  };
+
+  const handleRefreshSpecs = async () => {
+    if (!masterDeviceId) {
+      setSaveError("This product has no master catalog link — specs can’t be refreshed.");
+      return;
+    }
+    setRefreshingSpecs(true);
+    setSaveError("");
+    setSaveOk(false);
+    const result = await refreshMasterDeviceSpecs(masterDeviceId);
+    setRefreshingSpecs(false);
+    if (!result.success) {
+      setSaveError(result.error || "Could not refresh specs");
+      return;
+    }
+    const parsed = masterSpecsFromRow(result.specifications as Record<string, unknown>);
+    setMasterSpecsRaw(parsed.raw);
+    setSpecHighlights(parsed.highlights);
+    setSpecDescription(parsed.description);
+    setSpecSections(parsed.sections);
+    setSaveOk(true);
   };
 
   if (loading) return <div className="p-8">Loading product...</div>;
@@ -169,11 +415,106 @@ export default function EditProductPage({ params }: { params: Promise<{ id: stri
 
       <div className="flex gap-4 border-b mb-6">
         <button onClick={() => setActiveTab("basic")} className={`pb-2 px-1 border-b-2 font-medium ${activeTab === "basic" ? "border-black text-black" : "border-transparent text-gray-500"}`}>Basic Info</button>
+        <button onClick={() => setActiveTab("images")} className={`pb-2 px-1 border-b-2 font-medium ${activeTab === "images" ? "border-black text-black" : "border-transparent text-gray-500"}`}>
+          Images ({galleryImages.length}
+          {Object.keys(colorImages).length
+            ? ` · ${Object.keys(colorImages).length} colors`
+            : ""}
+          )
+        </button>
+        <button
+          onClick={() => setActiveTab("specs")}
+          className={`pb-2 px-1 border-b-2 font-medium ${
+            activeTab === "specs"
+              ? "border-black text-black"
+              : "border-transparent text-gray-500"
+          }`}
+        >
+          Specs ({specSections.length || "—"})
+        </button>
         <button onClick={() => setActiveTab("variants")} className={`pb-2 px-1 border-b-2 font-medium ${activeTab === "variants" ? "border-black text-black" : "border-transparent text-gray-500"}`}>Variants ({variants.length})</button>
         {product.type === 'used_mobile' && (
           <button onClick={() => setActiveTab("inspection")} className={`pb-2 px-1 border-b-2 font-medium ${activeTab === "inspection" ? "border-black text-black" : "border-transparent text-gray-500"}`}>Used Mobile Inspection</button>
         )}
       </div>
+
+      {activeTab === "images" && (
+        <div className="space-y-4">
+          {(saveError || saveOk) && (
+            <div>
+              {saveError ? (
+                <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{saveError}</p>
+              ) : null}
+              {saveOk ? (
+                <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                  Product saved.
+                </p>
+              ) : null}
+            </div>
+          )}
+          <ProductImagesPanel
+            mainImageUrl={mainImageUrl}
+            gallery={galleryImages}
+            colorImages={colorImages}
+            variantColors={variantColors}
+            enabledVariantColors={enabledVariantColors}
+            uploadPrefix={`edit/${product?.id || "product"}`}
+            onChange={({ mainImageUrl: m, gallery, colorImages: c }) => {
+              setMainImageUrl(m);
+              setGalleryImages(gallery);
+              setColorImages(c);
+              setSaveOk(false);
+            }}
+          />
+          <p className="text-xs text-gray-500">
+            Tip: disable unused color/storage options under Variants, then use
+            “Keep enabled colors only” here so storefront images stay clean.
+          </p>
+        </div>
+      )}
+
+      {activeTab === "specs" && (
+        <div className="space-y-4">
+          {(saveError || saveOk) && (
+            <div>
+              {saveError ? (
+                <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {saveError}
+                </p>
+              ) : null}
+              {saveOk ? (
+                <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                  Specs updated.
+                </p>
+              ) : null}
+            </div>
+          )}
+          {!masterDeviceId ? (
+            <div className="rounded-xl border border-dashed bg-white py-12 text-center text-sm text-gray-500">
+              This product is not linked to a master catalog device, so there’s
+              no shared technical spec sheet to edit.
+            </div>
+          ) : (
+            <ProductSpecsPanel
+              highlights={specHighlights}
+              description={specDescription}
+              sections={specSections}
+              refreshing={refreshingSpecs}
+              onRefreshFromGsmArena={handleRefreshSpecs}
+              onChange={({ highlights, description, sections }) => {
+                setSpecHighlights(highlights);
+                setSpecDescription(description);
+                setSpecSections(sections);
+                setSaveOk(false);
+              }}
+            />
+          )}
+          <p className="text-xs text-gray-500">
+            Use Save Changes after editing. The storefront product page reads these
+            specs automatically.
+          </p>
+        </div>
+      )}
 
       {activeTab === "basic" && (
         <div className="bg-white p-6 rounded-xl border shadow-sm space-y-6">
@@ -267,17 +608,77 @@ export default function EditProductPage({ params }: { params: Promise<{ id: stri
 
       {activeTab === "variants" && (
         <div className="space-y-4">
+          <p className="text-sm text-gray-500">
+            Turn off a color/storage option to hide it on the storefront. The
+            product stays live — only that variant is unavailable.
+          </p>
           {variants.length === 0 ? (
             <div className="bg-white p-8 text-center rounded-xl border border-dashed">
               <p className="text-gray-500">No variants defined. This is a single-variant product.</p>
             </div>
           ) : (
-            variants.map((variant, index) => (
-              <div key={variant.id} className="bg-white p-6 rounded-xl border shadow-sm flex items-start gap-4">
+            variants.map((variant, index) => {
+              const enabled = variant.status !== false;
+              const thumb =
+                variant.image_url ||
+                (variant.attributes?.color &&
+                  (colorImages[variant.attributes.color] ||
+                    Object.entries(colorImages).find(
+                      ([k]) =>
+                        k.toLowerCase() ===
+                        String(variant.attributes.color).toLowerCase()
+                    )?.[1])) ||
+                "";
+              return (
+              <div
+                key={variant.id}
+                className={`bg-white p-6 rounded-xl border shadow-sm flex items-start gap-4 ${
+                  enabled ? "" : "opacity-70 border-dashed"
+                }`}
+              >
+                <div className="h-16 w-16 shrink-0 overflow-hidden rounded-lg border bg-neutral-50">
+                  {thumb ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={thumb}
+                      alt={variant.name}
+                      className="h-full w-full object-contain p-1"
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-[10px] text-gray-400">
+                      No img
+                    </div>
+                  )}
+                </div>
                 <div className="flex-1 space-y-4">
-                  <Input label="Variant Name" value={variant.name} onChange={(e) => {
-                    const newVars = [...variants]; newVars[index].name = e.target.value; setVariants(newVars);
-                  }} />
+                  <div className="flex items-start justify-between gap-4">
+                    <Input label="Variant Name" value={variant.name} onChange={(e) => {
+                      const newVars = [...variants]; newVars[index].name = e.target.value; setVariants(newVars);
+                    }} />
+                    <label className="mt-7 flex items-center gap-2 shrink-0 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={enabled}
+                        onChange={(e) => {
+                          const newVars = [...variants];
+                          newVars[index] = {
+                            ...newVars[index],
+                            status: e.target.checked,
+                          };
+                          setVariants(newVars);
+                        }}
+                        className="h-4 w-4 rounded border-gray-300 text-black focus:ring-black"
+                      />
+                      <span className="text-sm font-medium text-gray-800">
+                        {enabled ? "Enabled" : "Disabled"}
+                      </span>
+                    </label>
+                  </div>
+                  {!enabled && (
+                    <p className="text-xs text-amber-700 -mt-2">
+                      Hidden from storefront — customers won’t see this option.
+                    </p>
+                  )}
                   <div className="grid grid-cols-3 gap-4">
                     <Input label="MRP (₹)" type="number" value={variant.mrp} onChange={(e) => {
                       const newVars = [...variants]; newVars[index].mrp = e.target.value; setVariants(newVars);
@@ -291,7 +692,8 @@ export default function EditProductPage({ params }: { params: Promise<{ id: stri
                   </div>
                 </div>
               </div>
-            ))
+            );
+            })
           )}
         </div>
       )}

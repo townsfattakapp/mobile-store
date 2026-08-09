@@ -3,9 +3,16 @@
 import React, { useMemo, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { ImageOff, Plus, Save, Trash2 } from "lucide-react";
+import { Plus, Save, Trash2 } from "lucide-react";
 import { createManualProduct } from "./actions";
 import { pickSmartCategoryId } from "@/lib/catalog/categorySmart";
+import { AdminImageUploader } from "@/components/admin/AdminImageUploader";
+import {
+  PRODUCT_TYPE_OPTIONS,
+  productTypeFromCategory,
+  type ProductTypeValue,
+} from "@/lib/catalog/productTypes";
+import { groupCategoriesForSelect } from "@/lib/catalog/storeCategories";
 
 type Category = { id: string; name: string; slug?: string | null };
 type Brand = { id: string; name: string };
@@ -15,6 +22,8 @@ type VariantDraft = {
   color: string;
   ram: string;
   storage: string;
+  cpu: string;
+  display_size: string;
   mrp: string;
   price: string;
   stock: string;
@@ -27,6 +36,8 @@ function emptyVariant(): VariantDraft {
     color: "",
     ram: "",
     storage: "",
+    cpu: "",
+    display_size: "",
     mrp: "",
     price: "",
     stock: "4",
@@ -54,7 +65,7 @@ export function ManualProductForm({
     name: "",
     sku: "",
     brandId: "",
-    type: "accessory" as "new_mobile" | "used_mobile" | "accessory" | "part",
+    type: "accessory" as ProductTypeValue,
     categoryId: pickSmartCategoryId(categories, "accessory") || "",
     mrp: "",
     price: "",
@@ -66,13 +77,49 @@ export function ManualProductForm({
     status: "active" as "draft" | "active",
   });
 
+  const categoryGroups = useMemo(
+    () => groupCategoriesForSelect(categories),
+    [categories]
+  );
+
+  const selectedTypeMeta = PRODUCT_TYPE_OPTIONS.find((o) => o.value === form.type);
+
+  const isLaptopCategory = useMemo(() => {
+    const cat = categories.find((c) => c.id === form.categoryId);
+    const slug = String(cat?.slug || cat?.name || "").toLowerCase();
+    return /laptop|macbook|notebook/.test(slug) || /laptop|macbook|notebook/i.test(form.name);
+  }, [categories, form.categoryId, form.name]);
+
   const setField = (key: keyof typeof form, value: string) => {
     setForm((prev) => {
       const next = { ...prev, [key]: value };
+
       if (key === "type") {
         next.categoryId =
           pickSmartCategoryId(categories, value, prev.name) || prev.categoryId;
       }
+
+      if (key === "categoryId") {
+        const cat = categories.find((c) => c.id === value);
+        const inferred = productTypeFromCategory(cat);
+        if (inferred) next.type = inferred;
+      }
+
+      if (key === "name" && value.trim()) {
+        // Soft-suggest category for accessories/parts when name changes
+        const smart = pickSmartCategoryId(
+          categories,
+          next.type,
+          value,
+        );
+        if (smart && (!prev.categoryId || prev.name.trim().length < 3)) {
+          next.categoryId = smart;
+          const cat = categories.find((c) => c.id === smart);
+          const inferred = productTypeFromCategory(cat);
+          if (inferred) next.type = inferred;
+        }
+      }
+
       return next;
     });
   };
@@ -87,11 +134,15 @@ export function ManualProductForm({
     );
   };
 
-  const previewImage = useMemo(() => {
-    if (form.imageUrl.trim()) return form.imageUrl.trim();
-    const fromVar = variants.find((v) => v.imageUrl.trim())?.imageUrl.trim();
-    return fromVar || "";
-  }, [form.imageUrl, variants]);
+  const uploadPrefix = useMemo(() => {
+    const base =
+      form.name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 40) || "product";
+    return `manual/${base}`;
+  }, [form.name]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -104,6 +155,8 @@ export function ManualProductForm({
             color: v.color,
             ram: v.ram,
             storage: v.storage,
+            cpu: v.cpu,
+            display_size: v.display_size,
             mrp: parseFloat(v.mrp || form.mrp) || 0,
             sellingPrice: parseFloat(v.price || form.price) || 0,
             stock: parseInt(v.stock || form.stock, 10) || 0,
@@ -175,18 +228,23 @@ export function ManualProductForm({
 
           <div>
             <label className="text-sm font-medium text-[#1d1d1f] mb-1.5 block">
-              Type *
+              Condition / listing type *
             </label>
             <select
               className={selectClass}
               value={form.type}
               onChange={(e) => setField("type", e.target.value)}
             >
-              <option value="accessory">Accessory</option>
-              <option value="new_mobile">New Mobile</option>
-              <option value="used_mobile">Used / Pre-Owned</option>
-              <option value="part">Spare Part</option>
+              {PRODUCT_TYPE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
             </select>
+            <p className="text-xs text-[#6e6e73] mt-1.5">
+              {selectedTypeMeta?.hint}. Phones, tablets, and laptops all use New or
+              Pre-Owned — pick the exact department in Store category below.
+            </p>
           </div>
 
           <div>
@@ -207,22 +265,31 @@ export function ManualProductForm({
             </select>
           </div>
 
-          <div>
+          <div className="md:col-span-2">
             <label className="text-sm font-medium text-[#1d1d1f] mb-1.5 block">
-              Category
+              Store category *
             </label>
             <select
               className={selectClass}
               value={form.categoryId}
               onChange={(e) => setField("categoryId", e.target.value)}
+              required
             >
-              <option value="">Select category</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
+              <option value="">Select category (phones, tablets, laptops, accessories…)</option>
+              {categoryGroups.map((group) => (
+                <optgroup key={group.label} label={group.label}>
+                  {group.options.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
             </select>
+            <p className="text-xs text-[#6e6e73] mt-1.5">
+              This is where tablets, laptops, wearables, mobile & computer accessories
+              live. Choosing a category auto-sets the listing type above.
+            </p>
           </div>
 
           <Input
@@ -299,39 +366,13 @@ export function ManualProductForm({
 
       <div className="bg-white p-6 rounded-xl border shadow-sm space-y-5">
         <h3 className="font-semibold text-[#1d1d1f] border-b pb-2">Image</h3>
-        <div className="flex flex-col sm:flex-row gap-4 items-start">
-          <div className="w-28 h-28 rounded-xl border bg-neutral-50 flex items-center justify-center overflow-hidden shrink-0">
-            {previewImage ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={previewImage}
-                alt="Preview"
-                className="w-full h-full object-contain p-2"
-                referrerPolicy="no-referrer"
-                onError={(e) => {
-                  (e.currentTarget as HTMLImageElement).style.display = "none";
-                }}
-              />
-            ) : (
-              <span className="text-neutral-400 flex flex-col items-center gap-1 text-[10px]">
-                <ImageOff size={18} />
-                Preview
-              </span>
-            )}
-          </div>
-          <div className="flex-1 w-full">
-            <Input
-              label="Main image URL"
-              value={form.imageUrl}
-              onChange={(e) => setField("imageUrl", e.target.value)}
-              placeholder="https://…"
-            />
-            <p className="text-xs text-[#6e6e73] mt-1.5">
-              Paste a brand image URL — it is uploaded to Cloudflare R2 and only
-              the R2 link is saved in the database.
-            </p>
-          </div>
-        </div>
+        <AdminImageUploader
+          label="Main product image"
+          value={form.imageUrl}
+          onChange={(url) => setField("imageUrl", url)}
+          prefix={uploadPrefix}
+          helpText="Upload from your computer — converted to WebP, resized under ~200KB, and stored on Cloudflare R2. Only the R2 URL is saved."
+        />
       </div>
 
       <div className="bg-white p-6 rounded-xl border shadow-sm space-y-5">
@@ -369,7 +410,9 @@ export function ManualProductForm({
           <div>
             <h3 className="font-semibold text-[#1d1d1f]">Variants (optional)</h3>
             <p className="text-xs text-[#6e6e73]">
-              Color / RAM / storage rows for phones or multi-SKU accessories.
+              {isLaptopCategory
+                ? "Laptop config matrix: CPU · RAM · SSD · display size · color."
+                : "Color / RAM / storage rows for phones or multi-SKU accessories."}
             </p>
           </div>
           <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
@@ -411,29 +454,47 @@ export function ManualProductForm({
                     </button>
                   )}
                 </div>
+                {isLaptopCategory && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <Input
+                      label="CPU / chipset"
+                      value={v.cpu}
+                      onChange={(e) => updateVariant(v.key, "cpu", e.target.value)}
+                      placeholder="Intel Core Ultra 7"
+                    />
+                    <Input
+                      label="Display size"
+                      value={v.display_size}
+                      onChange={(e) =>
+                        updateVariant(v.key, "display_size", e.target.value)
+                      }
+                      placeholder='15.6"'
+                    />
+                  </div>
+                )}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <Input
                     label="Color"
                     value={v.color}
                     onChange={(e) => updateVariant(v.key, "color", e.target.value)}
-                    placeholder="Black"
+                    placeholder="Silver"
                   />
                   <Input
-                    label="RAM"
+                    label={isLaptopCategory ? "RAM" : "RAM"}
                     value={v.ram}
                     onChange={(e) => updateVariant(v.key, "ram", e.target.value)}
-                    placeholder="8GB"
+                    placeholder={isLaptopCategory ? "16GB" : "8GB"}
                   />
                   <Input
-                    label="Storage"
+                    label={isLaptopCategory ? "SSD storage" : "Storage"}
                     value={v.storage}
                     onChange={(e) =>
                       updateVariant(v.key, "storage", e.target.value)
                     }
-                    placeholder="128GB"
+                    placeholder={isLaptopCategory ? "512GB" : "128GB"}
                   />
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <Input
                     label="MRP"
                     type="number"
@@ -455,15 +516,15 @@ export function ManualProductForm({
                     value={v.stock}
                     onChange={(e) => updateVariant(v.key, "stock", e.target.value)}
                   />
-                  <Input
-                    label="Image URL"
-                    value={v.imageUrl}
-                    onChange={(e) =>
-                      updateVariant(v.key, "imageUrl", e.target.value)
-                    }
-                    placeholder="Optional"
-                  />
                 </div>
+                <AdminImageUploader
+                  label="Variant image (optional)"
+                  value={v.imageUrl}
+                  onChange={(url) => updateVariant(v.key, "imageUrl", url)}
+                  prefix={`${uploadPrefix}-v${idx + 1}`}
+                  compact
+                  helpText="Optional color-specific shot. Same WebP + R2 pipeline as the main image."
+                />
               </div>
             ))}
             <Button

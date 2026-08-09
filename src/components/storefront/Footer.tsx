@@ -5,13 +5,7 @@ import Link from "next/link";
 import { ArrowUpRight, Mail, MapPin, Phone } from "lucide-react";
 import { useStoreConfig } from "@/components/storefront/StoreConfigProvider";
 import { brandLogoParts } from "@/lib/store/profile-shared";
-
-const SHOP = [
-  { href: "/new-mobiles", label: "New Mobiles" },
-  { href: "/used-mobiles", label: "Pre-Owned" },
-  { href: "/accessories", label: "Accessories" },
-  { href: "/parts", label: "Spare Parts" },
-];
+import { FOOTER_SHOP_LINKS } from "@/lib/storefront/nav";
 
 const SUPPORT = [
   { href: "/contact", label: "Contact Us" },
@@ -93,7 +87,7 @@ export function Footer() {
           <div className="ms-footer-col ms-footer-col--shop">
             <h4 className="ms-footer-heading">Shop</h4>
             <ul className="ms-footer-list">
-              {SHOP.map((item) => (
+              {FOOTER_SHOP_LINKS.map((item) => (
                 <li key={item.href}>
                   <Link href={item.href} className="ms-footer-link group">
                     {item.label}

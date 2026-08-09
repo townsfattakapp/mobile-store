@@ -69,9 +69,38 @@ async function main() {
   await checkHttp("/login");
   await checkHttp("/checkout");
   await checkHttp("/accessories");
+  await checkHttp("/categories");
+  await checkHttp("/parts");
 
   // Admin should redirect unauthenticated → login (307/302/303)
   await checkHttp("/admin", { expect: [307, 302, 303, 301] });
+  await checkHttp("/admin/settings", { expect: [307, 302, 303, 301] });
+  await checkHttp("/admin/orders", { expect: [307, 302, 303, 301] });
+  await checkHttp("/admin/pos", { expect: [307, 302, 303, 301] });
+
+  // Sample product PDP (if any published product exists)
+  {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key =
+      process.env.SUPABASE_SERVICE_ROLE_KEY ||
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (url && key) {
+      const sb = createClient(url, key, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const { data: sample } = await sb
+        .from("products")
+        .select("slug, status")
+        .eq("status", "active")
+        .limit(1)
+        .maybeSingle();
+      if (sample?.slug) {
+        await checkHttp(`/product/${sample.slug}`);
+      } else {
+        ok("HTTP /product/:slug", "skipped (no active product)");
+      }
+    }
+  }
 
   // Payment API validation
   {

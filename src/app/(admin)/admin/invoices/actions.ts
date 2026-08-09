@@ -28,6 +28,7 @@ import {
   writeStorefrontProfileToR2,
   type StorefrontProfile,
 } from "@/lib/store/profile";
+import { normalizeWhatsAppNumber } from "@/lib/whatsapp/normalizeWhatsAppNumber";
 
 export async function getStoreSettings(): Promise<StoreSettings> {
   const supabase = await createClient();
@@ -66,6 +67,7 @@ function profileFromSettings(merged: StoreSettings): StorefrontProfile {
     address_line: addressLine || undefined,
     instagram_url: merged.instagram_url || undefined,
     whatsapp_url: merged.whatsapp_url || undefined,
+    whatsapp_number: merged.whatsapp_number || undefined,
     instagram_reels: parseInstagramReelUrls(merged.instagram_reels),
     twitter_url: merged.twitter_url || undefined,
     facebook_url: merged.facebook_url || undefined,
@@ -99,6 +101,19 @@ export async function saveStoreSettings(payload: Partial<StoreSettings>) {
       return { error: "GSTIN state code (first 2 digits) must match store state code." };
     }
   }
+
+  const rawWhatsApp = String(merged.whatsapp_number || "").trim();
+  let whatsapp_number: string | null = null;
+  if (rawWhatsApp) {
+    whatsapp_number = normalizeWhatsAppNumber(rawWhatsApp);
+    if (!whatsapp_number) {
+      return {
+        error:
+          "Enter a valid WhatsApp number with country code (e.g. 9876543210, +91 98765 43210, or 919876543210).",
+      };
+    }
+  }
+  merged.whatsapp_number = whatsapp_number;
 
   const coreRow: Record<string, unknown> = {
     legal_name: merged.legal_name,
@@ -142,6 +157,7 @@ export async function saveStoreSettings(payload: Partial<StoreSettings>) {
         .join(", "),
     instagram_url: merged.instagram_url,
     whatsapp_url: merged.whatsapp_url,
+    whatsapp_number: merged.whatsapp_number || null,
     instagram_reels: Array.isArray(merged.instagram_reels)
       ? merged.instagram_reels.join("\n")
       : merged.instagram_reels,
@@ -168,6 +184,13 @@ export async function saveStoreSettings(payload: Partial<StoreSettings>) {
 
   if (current.id) {
     let { error } = await supabase.from("store_settings").update(fullRow).eq("id", current.id);
+    if (error && /whatsapp_number/i.test(error.message)) {
+      const { whatsapp_number: _wa, ...withoutWa } = brandingRow as any;
+      ({ error } = await supabase
+        .from("store_settings")
+        .update({ ...coreRow, ...withoutWa })
+        .eq("id", current.id));
+    }
     if (error && /column|brand_name|schema cache/i.test(error.message)) {
       // Branding columns not migrated yet — save core invoice fields only
       ({ error } = await supabase.from("store_settings").update(coreRow).eq("id", current.id));
@@ -175,6 +198,10 @@ export async function saveStoreSettings(payload: Partial<StoreSettings>) {
     if (error) return { error: error.message };
   } else {
     let { error } = await supabase.from("store_settings").insert(fullRow);
+    if (error && /whatsapp_number/i.test(error.message)) {
+      const { whatsapp_number: _wa, ...withoutWa } = brandingRow as any;
+      ({ error } = await supabase.from("store_settings").insert({ ...coreRow, ...withoutWa }));
+    }
     if (error && /column|brand_name|schema cache/i.test(error.message)) {
       ({ error } = await supabase.from("store_settings").insert(coreRow));
     }

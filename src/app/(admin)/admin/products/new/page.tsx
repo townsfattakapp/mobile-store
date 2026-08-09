@@ -16,15 +16,26 @@ import {
   bulkImportDiscoveredLinks,
   publishCatalogProduct,
 } from "./actions";
-import { pickSmartCategoryId } from "@/lib/catalog/categorySmart";
+import { annotateDiscoveredLinks } from "./annotateActions";
+import { pickSmartCategoryId, inferListingTypeAndCategory } from "@/lib/catalog/categorySmart";
+import {
+  STORE_CATEGORY_SEEDS,
+  groupCategoriesForSelect,
+} from "@/lib/catalog/storeCategories";
+import {
+  PRODUCT_TYPE_OPTIONS,
+  productTypeFromCategory,
+} from "@/lib/catalog/productTypes";
 import {
   lookupAppleIndiaMrp,
   lookupAppleVariantMrp,
 } from "@/lib/catalog/scraper/appleInPrices";
 import { formatStoreProductName } from "@/lib/catalog/scraper/extractProductImages";
 import { ManualProductForm } from "./ManualProductForm";
+import type { AnnotatedDiscoveredLink } from "@/lib/catalog/modelMatchKey";
+import { IMPORT_SOURCE_GROUPS } from "@/lib/catalog/importSources";
 
-type DiscoveredLink = { name: string; url: string; image?: string };
+type DiscoveredLink = AnnotatedDiscoveredLink;
 
 export default function NewProductPage() {
     const router = useRouter();
@@ -54,6 +65,38 @@ export default function NewProductPage() {
           link.url.toLowerCase().includes(q)
       );
     }, [scrapedLinks, listFilter]);
+
+    const addableFilteredLinks = useMemo(
+      () =>
+        filteredScrapedLinks.filter(
+          (l) => !l.status || l.status === "available"
+        ),
+      [filteredScrapedLinks]
+    );
+
+    const applyDiscoveredLinks = async (
+      items: { name: string; url: string; image?: string }[],
+      fallbackMessage?: string
+    ) => {
+      const plain = (items || []).map((i) => ({
+        name: String(i.name || ""),
+        url: String(i.url || ""),
+        image: i.image ? String(i.image) : undefined,
+      }));
+      const annotated = await annotateDiscoveredLinks(plain);
+      setScrapedLinks(
+        (annotated.items ||
+          plain.map((i) => ({
+            ...i,
+            status: "available" as const,
+            matchKey: "",
+          }))) as DiscoveredLink[]
+      );
+      setListFilter("");
+      setDiscoverMessage(
+        annotated.message || fallbackMessage || `Found ${plain.length} models`
+      );
+    };
   
     // Selected Master Device
     const [selectedDevice, setSelectedDevice] = useState<MasterDevice | null>(null);
@@ -67,6 +110,8 @@ export default function NewProductPage() {
     const [taxRate, setTaxRate] = useState("18");
     const [shortDescription, setShortDescription] = useState("");
     const [productName, setProductName] = useState("");
+    /** Gallery URLs selected for publish (empty = use all curated) */
+    const [selectedImageUrls, setSelectedImageUrls] = useState<string[]>([]);
   
     // Lookups
     const [categories, setCategories] = useState<{id: string, name: string, slug?: string | null}[]>([]);
@@ -74,37 +119,32 @@ export default function NewProductPage() {
 
     useEffect(() => {
       const fetchLookups = async () => {
+        // Ensure full category catalog exists (phones, tabs, laptops, accessories…)
+        await supabase.from("categories").upsert(
+          STORE_CATEGORY_SEEDS.map((c) => ({
+            name: c.name,
+            slug: c.slug,
+            description: c.description || null,
+            active: true,
+          })),
+          { onConflict: "slug" }
+        );
+
         let { data } = await supabase
           .from("categories")
           .select("id, name, slug")
+          .eq("active", true)
           .order("name");
-
-        // Ensure a proper phone category exists (avoid Batteries-as-default trap)
-        const hasPhoneCat = (data || []).some((c) =>
-          /smart\s*phone|smartphone|\bmobiles?\b|\bphones?\b/i.test(c.name)
-        );
-        if (!hasPhoneCat) {
-          const { data: created } = await supabase
-            .from("categories")
-            .upsert(
-              {
-                name: "Smartphones",
-                slug: "smartphones",
-                description: "New and pre-owned mobile phones",
-                active: true,
-              },
-              { onConflict: "slug" }
-            )
-            .select("id, name, slug")
-            .single();
-          if (created) {
-            data = [...(data || []), created];
-          }
-        }
 
         if (data) {
           setCategories(data);
-          setCategoryId(pickSmartCategoryId(data, "new_mobile"));
+          const inferred = inferListingTypeAndCategory({
+            modelName: "",
+            specProductType: "new_mobile",
+          });
+          setCategoryId(
+            pickSmartCategoryId(data, "new_mobile", "", inferred.categorySlug)
+          );
         }
 
         const { data: brandRows } = await supabase
@@ -116,7 +156,7 @@ export default function NewProductPage() {
       fetchLookups();
     }, []);
 
-    // Keep category aligned when product type changes
+    // Keep category aligned when product type changes (unless user already chose)
     useEffect(() => {
       if (categories.length === 0) return;
       setCategoryId(
@@ -145,9 +185,8 @@ export default function NewProductPage() {
             // Auto-scan category / brand pages so user sees models immediately
             const scan = await bulkScrapeCategoryLinks(searchQuery);
             if (scan.success && scan.items && scan.items.length > 0) {
-              setScrapedLinks(scan.items as DiscoveredLink[]);
-              setListFilter("");
-              setDiscoverMessage(
+              await applyDiscoveredLinks(
+                scan.items,
                 scan.message || `Found ${scan.items.length} models on this page`
               );
             }
@@ -186,30 +225,33 @@ export default function NewProductPage() {
       setShortDescription(niceName);
       setTaxRate("18");
 
-      // Auto-pick accessory type ONLY for clear accessories (not phones)
-      const specType = String(device.specifications?.product_type || "");
-      const looksPhone =
-        /iphone|smartphone|5g|pova|galaxy|pixel|camon|spark|android/i.test(
-          device.model_name || ""
-        ) || specType === "mobile";
-      const looksAccessory =
-        !looksPhone &&
-        (specType === "accessory" ||
-          /power\s*bank|charger|cable|earbuds|vacuum|mouse|neckband/i.test(
-            device.model_name || ""
-          ));
-      if (looksAccessory) {
-        setProductType("accessory");
-      } else if (looksPhone) {
-        setProductType("new_mobile");
+      const gallery: string[] = [];
+      const main =
+        (device as any).main_image_url ||
+        device.specifications?.main_image_url ||
+        "";
+      if (main) gallery.push(main);
+      for (const g of (device.specifications?.gallery_images as string[]) || []) {
+        if (g && !gallery.includes(g)) gallery.push(g);
       }
+      // Default: select first 6 images so publish stays light; admin can toggle
+      setSelectedImageUrls(gallery.slice(0, 6));
+
+      // Auto-pick type + store category from model / scrape metadata
+      const inferred = inferListingTypeAndCategory({
+        modelName: device.model_name,
+        sourceProvider: String(device.source_provider || ""),
+        specProductType: String(device.specifications?.product_type || ""),
+      });
+      setProductType(inferred.productType);
 
       if (categories.length) {
         setCategoryId(
           pickSmartCategoryId(
             categories,
-            looksAccessory ? "accessory" : looksPhone ? "new_mobile" : productType,
-            device.model_name
+            inferred.productType,
+            device.model_name,
+            inferred.categorySlug
           )
         );
       }
@@ -222,15 +264,34 @@ export default function NewProductPage() {
         device.specifications?.color_images || {};
 
       // Backfill missing variant thumbnails from color_images map
+      // and hydrate laptop axes from variant_pricing when DB columns are empty
       if (device.variants?.length) {
         device.variants = device.variants.map((v) => {
-          if (v.reference_image_url) return v;
-          const img =
-            colorImages[v.color || ""] ||
-            Object.entries(colorImages).find(
-              ([k]) => k.toLowerCase() === String(v.color || "").toLowerCase()
-            )?.[1];
-          return img ? { ...v, reference_image_url: img } : v;
+          let next: any = { ...v };
+          if (!next.reference_image_url) {
+            const img =
+              colorImages[v.color || ""] ||
+              Object.entries(colorImages).find(
+                ([k]) => k.toLowerCase() === String(v.color || "").toLowerCase()
+              )?.[1];
+            if (img) next = { ...next, reference_image_url: img };
+          }
+          const priceHit = pricingList.find(
+            (p) =>
+              String(p.color || "").toLowerCase() ===
+                String(v.color || "").toLowerCase() &&
+              String(p.storage || "").replace(/\s/g, "").toUpperCase() ===
+                String(v.storage || "").replace(/\s/g, "").toUpperCase() &&
+              (!p.ram ||
+                String(p.ram || "").replace(/\s/g, "").toUpperCase() ===
+                  String(v.ram || "").replace(/\s/g, "").toUpperCase())
+          );
+          if (priceHit) {
+            if (!next.cpu && priceHit.cpu) next.cpu = priceHit.cpu;
+            if (!next.display_size && priceHit.display_size)
+              next.display_size = priceHit.display_size;
+          }
+          return next;
         });
       }
 
@@ -328,9 +389,10 @@ export default function NewProductPage() {
               return;
             }
             if (fallback.mode === "expand") {
-              setScrapedLinks((fallback.items || []) as DiscoveredLink[]);
-              setListFilter("");
-              setDiscoverMessage(fallback.message || "");
+              await applyDiscoveredLinks(
+                fallback.items || [],
+                fallback.message || ""
+              );
               setFetchingUrl(null);
               return;
             }
@@ -344,13 +406,27 @@ export default function NewProductPage() {
             return;
           }
           if (smart.mode === "expand") {
-            setScrapedLinks((smart.items || []) as DiscoveredLink[]);
-            setListFilter("");
-            setDiscoverMessage(smart.message || `Found ${(smart.items || []).length} models`);
+            await applyDiscoveredLinks(
+              smart.items || [],
+              smart.message || `Found ${(smart.items || []).length} models`
+            );
             setFetchingUrl(null);
             return;
           }
           if (smart.mode === "product" && smart.deviceId) {
+            // Mark this URL as taken in the list (if still visible)
+            setScrapedLinks((prev) =>
+              prev.map((l) =>
+                l.url === q
+                  ? {
+                      ...l,
+                      status: "in_master" as const,
+                      masterDeviceId: smart.deviceId,
+                      existingName: smart.model_name || l.name,
+                    }
+                  : l
+              )
+            );
             const ok = await handleSelectDevice(smart.deviceId);
             if (ok) setDiscoverMessage(smart.message || `Imported ${smart.model_name}`);
             setFetchingUrl(null);
@@ -381,9 +457,10 @@ export default function NewProductPage() {
       setDiscoverMessage("");
       const result = await bulkScrapeCategoryLinks(searchQuery);
       if (result.success && result.items) {
-        setScrapedLinks(result.items as DiscoveredLink[]);
-        setListFilter("");
-        setDiscoverMessage(result.message || `Found ${result.items.length} models`);
+        await applyDiscoveredLinks(
+          result.items,
+          result.message || `Found ${result.items.length} models`
+        );
       } else {
         alert("Failed to scan page: " + (result.error || "Unknown error"));
       }
@@ -391,14 +468,21 @@ export default function NewProductPage() {
     };
 
     const handleImportAll = async () => {
-      const toImport = listFilter.trim() ? filteredScrapedLinks : scrapedLinks;
-      if (toImport.length === 0) return;
+      const toImport = listFilter.trim()
+        ? addableFilteredLinks
+        : scrapedLinks.filter((l) => !l.status || l.status === "available");
+      if (toImport.length === 0) {
+        alert(
+          "Nothing new to add — shown models are already in Master Catalog or store."
+        );
+        return;
+      }
       const scope = listFilter.trim()
         ? `${toImport.length} filtered`
-        : `all ${toImport.length}`;
+        : `${toImport.length}`;
       if (
         !confirm(
-          `Import ${scope} model(s) into Master Catalog? This may take a minute.`
+          `Import ${scope} new model(s) into Master Catalog? Already-added items will be skipped.`
         )
       )
         return;
@@ -407,8 +491,11 @@ export default function NewProductPage() {
       const result = await bulkImportDiscoveredLinks(toImport);
       setImportProgress(result.message || "Done");
       setIsImportingAll(false);
+      // Re-annotate list so imported ones show as blocked
+      if (scrapedLinks.length > 0) {
+        await applyDiscoveredLinks(scrapedLinks, result.message);
+      }
       alert(result.message);
-      // Refresh catalog search if query is short text
       if (searchQuery && !searchQuery.startsWith("http")) {
         const results = await manualProvider.searchDevices(searchQuery);
         setSearchResults(results);
@@ -475,6 +562,8 @@ export default function NewProductPage() {
           taxRate: parseFloat(taxRate) || 18,
           productName: productName.trim() || undefined,
           shortDescription: shortDescription || undefined,
+          selectedImageUrls:
+            selectedImageUrls.length > 0 ? selectedImageUrls : undefined,
           variants: activeVariantsList.map(([vId, conf]) => ({
             masterVariantId: vId,
             mrp: parseFloat(conf.mrp) || 0,
@@ -486,6 +575,11 @@ export default function NewProductPage() {
         if (!result?.success) {
           const msg = result?.error || "Failed to publish product";
           setFormError(msg);
+          return;
+        }
+        if ((result as any).merged && (result as any).productId) {
+          alert(result.message || "Updated existing product with new variants.");
+          router.push(`/admin/products/${(result as any).productId}`);
           return;
         }
         router.push("/admin/products");
@@ -537,66 +631,50 @@ export default function NewProductPage() {
               
               {!searchQuery && (
                 <div className="mt-8 space-y-6">
-                  <div>
-                    <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Mobile Brands (Tap to paste)</h3>
-                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                      {[
-                        { name: "Apple", url: "https://www.apple.com/in/iphone/" },
-                        { name: "Inspire (Apple)", url: "https://inspireonline.in/" },
-                        { name: "Samsung", url: "https://www.samsung.com/in/smartphones/all-smartphones/" },
-                        { name: "OnePlus", url: "https://www.oneplus.in/" },
-                        { name: "Google Pixel", url: "https://store.google.com/in/category/phones?hl=en-IN&pli=1" },
-                        { name: "Nothing", url: "https://in.nothing.tech/collections/phones" },
-                        { name: "Vivo", url: "https://www.vivo.com/in/products" },
-                        { name: "Oppo", url: "https://www.oppo.com/in/smartphones/" },
-                        { name: "Xiaomi", url: "https://www.mi.com/in/" },
-                        { name: "Poco", url: "https://www.poco.in/" },
-                        { name: "Realme", url: "https://www.realme.com/in/" },
-                        { name: "iQOO", url: "https://www.iqoo.com/" },
-                        { name: "Motorola", url: "https://www.motorola.in/" },
-                        { name: "Infinix", url: "https://infinixmobiles.in/" },
-                        { name: "Tecno", url: "https://www.tecno-mobile.com/home/" },
-                        { name: "Lava", url: "https://lavamobiles.com/" },
-                        { name: "HMD (Nokia)", url: "https://www.hmd.com/en_in" },
-                        { name: "AI Plus", url: "https://aiplusstore.com/" },
-                      ].map(brand => (
-                        <div 
-                          key={brand.name}
-                          onClick={() => setSearchQuery(brand.url)}
-                          className="p-2 border rounded-lg cursor-pointer hover:border-black hover:bg-gray-50 transition-colors flex flex-col justify-center text-center"
-                        >
-                          <span className="font-medium text-xs text-gray-900">{brand.name}</span>
-                          <span className="text-[9px] text-gray-400 truncate mt-0.5">{new URL(brand.url).hostname.replace('www.', '')}</span>
-                        </div>
-                      ))}
+                  {IMPORT_SOURCE_GROUPS.map((group) => (
+                    <div key={group.id}>
+                      <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
+                        {group.label}
+                      </h3>
+                      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                        {group.items.map((brand) => (
+                          <div
+                            key={`${group.id}-${brand.name}`}
+                            onClick={() => setSearchQuery(brand.url)}
+                            className="p-2 border rounded-lg cursor-pointer hover:border-black hover:bg-gray-50 transition-colors flex flex-col justify-center text-center"
+                          >
+                            <span className="font-medium text-xs text-gray-900">
+                              {brand.name}
+                            </span>
+                            <span className="text-[9px] text-gray-400 truncate mt-0.5">
+                              {(() => {
+                                try {
+                                  return new URL(brand.url).hostname.replace(
+                                    /^www\./,
+                                    ""
+                                  );
+                                } catch {
+                                  return brand.url;
+                                }
+                              })()}
+                            </span>
+                            {brand.note ? (
+                              <span className="text-[9px] text-emerald-700 mt-0.5">
+                                {brand.note}
+                              </span>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-
-                  <div>
-                    <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Accessories & Storage</h3>
-                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                      {[
-                        { name: "boAt", url: "https://www.boat-lifestyle.com/" },
-                        { name: "Spigen", url: "https://spigen.in/" },
-                        { name: "Portronics", url: "https://www.portronics.com/collections/mobile-accessories" },
-                        { name: "Ambrane", url: "https://ambraneindia.com/" },
-                        { name: "Nu Republic", url: "https://www.nurepublic.co/" },
-                        { name: "Zebronics", url: "https://zebronics.com/" },
-                        { name: "SanDisk", url: "https://www.sandisk.com/en-in" },
-                        { name: "Urbn", url: "https://urbnworld.com/collections/power-banks" },
-                        { name: "Boult", url: "https://goboult.co.in/" },
-                      ].map(brand => (
-                        <div 
-                          key={brand.name}
-                          onClick={() => setSearchQuery(brand.url)}
-                          className="p-2 border rounded-lg cursor-pointer hover:border-black hover:bg-gray-50 transition-colors flex flex-col justify-center text-center"
-                        >
-                          <span className="font-medium text-xs text-gray-900">{brand.name}</span>
-                          <span className="text-[9px] text-gray-400 truncate mt-0.5">{new URL(brand.url).hostname.replace('www.', '')}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                  ))}
+                  <p className="text-xs text-[#6e6e73]">
+                    Tap a brand to paste its store URL, then click Search. Shopify
+                    shops (Noise, Stuffcool, Fire-Boltt, Boult, pTron, UBON) expand
+                    product lists automatically. Paste any product URL for a single
+                    import. OEM PC sites marked “Coming soon” may need extra
+                    adapters.
+                  </p>
                 </div>
               )}
 
@@ -646,15 +724,17 @@ export default function NewProductPage() {
                           disabled={
                             isImportingAll ||
                             fetchingUrl !== null ||
-                            filteredScrapedLinks.length === 0
+                            addableFilteredLinks.length === 0
                           }
                           className="bg-[#0B5cff] text-white hover:bg-[#004BBF]"
                         >
                           {isImportingAll
                             ? "Adding all..."
-                            : listFilter.trim()
-                              ? `Add ${filteredScrapedLinks.length} Shown`
-                              : "Add All Models"}
+                            : addableFilteredLinks.length === 0
+                              ? "Nothing new"
+                              : listFilter.trim()
+                                ? `Add ${addableFilteredLinks.length} New`
+                                : `Add ${addableFilteredLinks.length} New`}
                         </Button>
                       </div>
 
@@ -678,10 +758,16 @@ export default function NewProductPage() {
                              No models match “{listFilter.trim()}”
                            </p>
                          ) : (
-                           filteredScrapedLinks.map((link, idx) => (
+                           filteredScrapedLinks.map((link, idx) => {
+                            const blocked =
+                              link.status === "in_store" ||
+                              link.status === "in_master";
+                            return (
                             <div
                               key={`${link.url}-${idx}`}
-                              className="flex items-center justify-between gap-3 p-3 bg-white border rounded-lg hover:shadow-sm"
+                              className={`flex items-center justify-between gap-3 p-3 bg-white border rounded-lg hover:shadow-sm ${
+                                blocked ? "opacity-80" : ""
+                              }`}
                             >
                                <div className="flex items-center gap-3 min-w-0 flex-1">
                                   <div className="w-14 h-14 sm:w-16 sm:h-16 shrink-0 rounded-lg bg-neutral-100 border border-neutral-200 flex items-center justify-center overflow-hidden">
@@ -715,21 +801,62 @@ export default function NewProductPage() {
                                     <p className="font-semibold text-sm text-[#1d1d1f] leading-snug">
                                       {link.name}
                                     </p>
-                                    <p className="text-xs text-blue-600 truncate max-w-[200px] sm:max-w-[380px]">
-                                      {link.url}
-                                    </p>
+                                    {blocked ? (
+                                      <p className="text-xs text-amber-700 mt-0.5">
+                                        {link.status === "in_store"
+                                          ? `Already in store${
+                                              link.existingName
+                                                ? ` (“${link.existingName}”)`
+                                                : ""
+                                            }`
+                                          : `In Master Catalog${
+                                              link.existingName
+                                                ? ` (“${link.existingName}”)`
+                                                : ""
+                                            } — open to configure`}
+                                      </p>
+                                    ) : (
+                                      <p className="text-xs text-blue-600 truncate max-w-[200px] sm:max-w-[380px]">
+                                        {link.url}
+                                      </p>
+                                    )}
                                   </div>
                                </div>
-                               <Button
-                                 size="sm"
-                                 onClick={() => handleAutoFetch(link.url)}
-                                 disabled={fetchingUrl !== null || isImportingAll}
-                                 className="bg-black text-white hover:bg-gray-800 shrink-0"
-                               >
-                                  {fetchingUrl === link.url ? "Adding..." : "Add"}
-                                </Button>
+                               {link.status === "in_store" && link.productId ? (
+                                 <Link
+                                   href={`/admin/products/${link.productId}`}
+                                   className="shrink-0"
+                                 >
+                                   <Button size="sm" variant="outline">
+                                     Open
+                                   </Button>
+                                 </Link>
+                               ) : link.status === "in_master" &&
+                                 link.masterDeviceId ? (
+                                 <Button
+                                   size="sm"
+                                   variant="outline"
+                                   disabled={fetchingUrl !== null || isImportingAll}
+                                   onClick={() =>
+                                     handleSelectDevice(link.masterDeviceId!)
+                                   }
+                                   className="shrink-0"
+                                 >
+                                   Configure
+                                 </Button>
+                               ) : (
+                                 <Button
+                                   size="sm"
+                                   onClick={() => handleAutoFetch(link.url)}
+                                   disabled={fetchingUrl !== null || isImportingAll}
+                                   className="bg-black text-white hover:bg-gray-800 shrink-0"
+                                 >
+                                    {fetchingUrl === link.url ? "Adding..." : "Add"}
+                                  </Button>
+                               )}
                             </div>
-                           ))
+                           );
+                           })
                          )}
                       </div>
                    </div>
@@ -898,31 +1025,65 @@ export default function NewProductPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Product Condition/Type</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Condition / listing type *
+                </label>
                 <select 
                   value={productType} 
-                  onChange={(e) => setProductType(e.target.value)}
+                  onChange={(e) => {
+                    const nextType = e.target.value;
+                    setProductType(nextType);
+                    setCategoryId(
+                      pickSmartCategoryId(
+                        categories,
+                        nextType,
+                        productName || selectedDevice?.model_name
+                      ) || categoryId
+                    );
+                  }}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-black text-[#1d1d1f] bg-white"
                 >
-                  <option value="new_mobile">New Mobile (Box Pack)</option>
-                  <option value="used_mobile">Used / Pre-Owned</option>
-                  <option value="accessory">Accessory (Earbuds, Cases, Chargers, etc.)</option>
-                  <option value="part">Spare Part</option>
+                  {PRODUCT_TYPE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
                 </select>
+                <p className="text-[11px] text-[#6e6e73] mt-1">
+                  Coarse listing lane only. Use Store category for phones, tablets,
+                  laptops, accessories, and parts.
+                </p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Store Category *</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Store category *</label>
                 <select 
                   value={categoryId} 
-                  onChange={(e) => setCategoryId(e.target.value)}
+                  onChange={(e) => {
+                    const nextId = e.target.value;
+                    setCategoryId(nextId);
+                    const cat = categories.find((c) => c.id === nextId);
+                    const inferred = productTypeFromCategory(cat);
+                    if (inferred) setProductType(inferred);
+                  }}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-black text-[#1d1d1f] bg-white"
                 >
-                  <option value="">Select Category</option>
-                  {categories.map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
+                  <option value="">Select category</option>
+                  {groupCategoriesForSelect(categories).map((group) => (
+                    <optgroup key={group.label} label={group.label}>
+                      {group.options.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
+                <p className="text-[11px] text-[#6e6e73] mt-1">
+                  Includes phones, tablets, laptops, mobile & computer accessories —
+                  auto-picked when you select a model. Choosing a category also updates
+                  listing type.
+                </p>
               </div>
 
               <div>
@@ -952,6 +1113,85 @@ export default function NewProductPage() {
               </div>
             </div>
 
+            {(() => {
+              const allImgs: string[] = [];
+              const main =
+                (selectedDevice as any).main_image_url ||
+                selectedDevice.specifications?.main_image_url ||
+                "";
+              if (main) allImgs.push(main);
+              for (const g of (selectedDevice.specifications?.gallery_images as string[]) || []) {
+                if (g && !allImgs.includes(g)) allImgs.push(g);
+              }
+              if (!allImgs.length) return null;
+              return (
+                <div className="mb-6">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <h4 className="font-medium text-gray-700">
+                      Product images ({selectedImageUrls.length}/{allImgs.length} selected)
+                    </h4>
+                    <div className="flex gap-2 text-xs">
+                      <button
+                        type="button"
+                        className="underline text-gray-600 hover:text-black"
+                        onClick={() => setSelectedImageUrls([...allImgs])}
+                      >
+                        Select all
+                      </button>
+                      <button
+                        type="button"
+                        className="underline text-gray-600 hover:text-black"
+                        onClick={() => setSelectedImageUrls(allImgs.slice(0, 1))}
+                      >
+                        Main only
+                      </button>
+                      <button
+                        type="button"
+                        className="underline text-gray-600 hover:text-black"
+                        onClick={() => setSelectedImageUrls([])}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                  <p className="mb-3 text-xs text-[#6e6e73]">
+                    Uncheck images you don’t want on the storefront. First selected becomes the main image.
+                  </p>
+                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
+                    {allImgs.map((url, idx) => {
+                      const checked = selectedImageUrls.includes(url);
+                      return (
+                        <button
+                          key={`${url}-${idx}`}
+                          type="button"
+                          onClick={() => {
+                            setSelectedImageUrls((prev) =>
+                              prev.includes(url)
+                                ? prev.filter((u) => u !== url)
+                                : [...prev, url]
+                            );
+                          }}
+                          className={`relative rounded-lg border-2 overflow-hidden bg-gray-50 aspect-square ${
+                            checked ? "border-black" : "border-transparent opacity-60"
+                          }`}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={url}
+                            alt={`Image ${idx + 1}`}
+                            className="w-full h-full object-contain p-1"
+                          />
+                          <span className="absolute top-1 left-1 rounded bg-white/90 px-1.5 py-0.5 text-[10px] font-semibold">
+                            {checked ? (selectedImageUrls.indexOf(url) === 0 ? "Main" : "On") : "Off"}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
             <h4 className="font-medium text-gray-700 mb-3">Select Variants to List</h4>
             {(!selectedDevice.variants || selectedDevice.variants.length === 0) && (
               <p className="text-sm text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-4">
@@ -980,7 +1220,19 @@ export default function NewProductPage() {
                       <span className="font-semibold text-lg text-gray-900 block">
                         {v.color || "Standard"} · {v.storage}
                       </span>
-                      <span className="text-gray-500 text-sm">{v.ram ? `${v.ram} RAM` : ""}</span>
+                      <span className="text-gray-500 text-sm">
+                        {(v as any).cpu || (v as any).display_size
+                          ? [
+                              (v as any).cpu,
+                              (v as any).display_size,
+                              v.ram ? `${v.ram} RAM` : "",
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")
+                          : v.ram
+                            ? `${v.ram} RAM`
+                            : ""}
+                      </span>
                     </div>
                     {variantsConfig[v.id]?.mrp ? (
                       <span className="text-sm font-medium text-[#0B5cff] ml-auto">
@@ -1031,8 +1283,12 @@ export default function NewProductPage() {
                 disabled={saving}
                 className="flex items-center gap-2"
               >
-                {saving ? "Publishing..." : <><Save size={18} /> Publish to Store</>}
+                {saving ? "Publishing..." : <><Save size={18} /> Publish / Update Store</>}
               </Button>
+              <p className="text-[11px] text-[#6e6e73] max-w-xs text-right leading-snug">
+                If this model is already in store (same type), new color/storage
+                options are merged into that listing — not duplicated.
+              </p>
               {saving && (
                 <p className="text-xs text-[#6e6e73]">
                   Uploading images to Cloudflare R2 — this can take 10–30 seconds…

@@ -99,7 +99,7 @@ async function fetchJson(url: string): Promise<any | null> {
 }
 
 /**
- * Paginate Shopify /products.json (public, no auth on most stores).
+ * Paginate Shopify /products.json or /collections/{handle}/products.json.
  */
 export async function fetchShopifyCatalog(
   pageUrl: string,
@@ -110,10 +110,32 @@ export async function fetchShopifyCatalog(
   const items: { name: string; url: string; image?: string }[] = [];
   const seen = new Set<string>();
 
-  for (let page = 1; page <= maxPages; page++) {
-    const data = await fetchJson(
-      `${origin}/products.json?limit=${pageSize}&page=${page}`
+  let collectionHandle: string | null = null;
+  try {
+    const path = new URL(pageUrl).pathname.replace(/\/+$/, "");
+    const m = path.match(/^\/collections\/([^/]+)/i);
+    if (m && m[1].toLowerCase() !== "all") collectionHandle = decodeURIComponent(m[1]);
+  } catch {
+    /* ignore */
+  }
+
+  // Refit / large refurbished catalogs — allow more pages
+  const isRefit = /refitglobal\.com/i.test(origin);
+  const isBigAccessoryShop =
+    /gonoise\.com|stuffcool\.com|fireboltt\.com|goboult\.co\.in|ptron\.in|ubonindia\.com|boat-lifestyle\.com/i.test(
+      origin
     );
+  const pages = isRefit
+    ? Math.max(maxPages, 20)
+    : isBigAccessoryShop
+      ? Math.max(maxPages, 12)
+      : maxPages;
+
+  for (let page = 1; page <= pages; page++) {
+    const endpoint = collectionHandle
+      ? `${origin}/collections/${collectionHandle}/products.json?limit=${pageSize}&page=${page}`
+      : `${origin}/products.json?limit=${pageSize}&page=${page}`;
+    const data = await fetchJson(endpoint);
     const products: ShopifyJsonProduct[] = data?.products || [];
     if (!products.length) break;
 
@@ -127,7 +149,7 @@ export async function fetchShopifyCatalog(
       items.push({
         name: p.title || p.handle,
         url: `${origin}/products/${p.handle}`,
-        ...(image ? { image } : {}),
+        ...(image ? { image: absShopifyImage(image) } : {}),
       });
     }
 

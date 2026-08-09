@@ -5,6 +5,7 @@ import {
   signDemoPayment,
   verifyRazorpaySignature,
 } from "@/lib/payments/razorpay";
+import { notifyOwnerOfOrderById } from "@/lib/notify/notifyOwner";
 
 export const runtime = "nodejs";
 
@@ -71,6 +72,9 @@ export async function POST(req: NextRequest) {
     if (upErr) {
       return NextResponse.json({ error: upErr.message }, { status: 500 });
     }
+
+    // Second owner ping when online payment succeeds
+    await notifyOwnerOfOrderById(dbOrderId, "payment_confirmed");
 
     return NextResponse.json({
       success: true,

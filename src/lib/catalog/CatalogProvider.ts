@@ -4,6 +4,10 @@ export type MasterVariant = {
   ram: string | null;
   storage: string | null;
   color: string | null;
+  /** Laptop config axis */
+  cpu?: string | null;
+  /** Laptop display size, e.g. 15.6″ */
+  display_size?: string | null;
   /** Optional — scrapers / enrichers may omit until an image is resolved */
   reference_image_url?: string | null;
 };
@@ -14,7 +18,7 @@ export type MasterDevice = {
   model_name: string;
   slug: string;
   release_year: number | null;
-  device_type?: "smartphone" | "tablet" | "accessory" | "part";
+  device_type?: "smartphone" | "tablet" | "laptop" | "accessory" | "part";
   specifications: Record<string, any>;
   source_provider: string;
   source_external_id?: string | null;

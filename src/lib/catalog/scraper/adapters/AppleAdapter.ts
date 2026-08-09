@@ -50,7 +50,7 @@ export class AppleAdapter implements ScraperAdapter {
     // Prefer shop buy page for colors / finish images / accurate config data
     let buyHtml = html;
     const buyUrl = appleBuyUrlFromProductUrl(url, modelName);
-    if (buyUrl && !url.includes("/shop/buy-iphone/")) {
+    if (buyUrl && !/\/shop\/buy-(iphone|mac|ipad|watch)\//i.test(url)) {
       try {
         const buyRes = await fetch(buyUrl, {
           headers: {
@@ -96,6 +96,15 @@ export class AppleAdapter implements ScraperAdapter {
       parseAppleShopPrices(buyHtml).sellingPrice ||
       extractIndianPrice(cheerio.load(buyHtml), buyHtml).sellingPrice ||
       lookupAppleIndiaMrp(modelName);
+    if (!Number.isFinite(starting as number) || (starting as number) <= 0) {
+      starting =
+        parseAppleShopPrices(buyHtml).sellingPrice ||
+        lookupAppleIndiaMrp(modelName) ||
+        null;
+    }
+    if (!Number.isFinite(starting as number) || (starting as number) <= 0) {
+      starting = null;
+    }
 
     const gallery = collectSingleDeviceGallery(
       buyHtml + "\n" + html,
@@ -117,6 +126,12 @@ export class AppleAdapter implements ScraperAdapter {
       selling_price: v.mrp,
     }));
 
+    const isMac = /macbook|imac|mac\s*mini|mac\s*studio|mac\s*pro|studio\s*display/i.test(
+      modelName
+    );
+    const isIpad = /^ipad/i.test(modelName);
+    const isWatch = /watch/i.test(modelName);
+
     return {
       brand_id: "",
       brand_name: "Apple",
@@ -125,11 +140,17 @@ export class AppleAdapter implements ScraperAdapter {
       release_year: new Date().getFullYear(),
       source_provider: "scraper_apple",
       specifications: {
-        processor: "Apple Silicon (Refer to official specs)",
-        display: "Super Retina XDR",
-        camera: "Pro Camera System",
+        processor: isMac
+          ? "Apple silicon (refer to official specs)"
+          : "Apple Silicon (Refer to official specs)",
+        display: isMac
+          ? "Liquid Retina / Liquid Retina XDR"
+          : isIpad
+            ? "Liquid Retina"
+            : "Super Retina XDR",
+        camera: isMac || isWatch ? "—" : "Pro Camera System",
         battery: "All-day battery life",
-        os: "iOS",
+        os: isMac ? "macOS" : isIpad ? "iPadOS" : isWatch ? "watchOS" : "iOS",
         dimensions: "Unknown",
         weight: "Unknown",
         description:
@@ -142,6 +163,7 @@ export class AppleAdapter implements ScraperAdapter {
         selling_price: starting ?? undefined,
         currency: "INR",
         price_source: "apple_in_variant_matrix",
+        product_type: isMac ? "laptop" : isIpad ? "tablet" : isWatch ? "wearable" : "mobile",
         variant_pricing: built.variants.map((v) => ({
           color: v.color,
           storage: v.storage,

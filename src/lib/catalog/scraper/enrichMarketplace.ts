@@ -225,6 +225,14 @@ export function brandHintFromUrl(url: string): string {
     if (host.includes("hmd") || host.includes("nokia")) return "HMD";
     if (host.includes("nothing")) return "Nothing";
     if (host.includes("apple")) return "Apple";
+    if (host.includes("dell")) return "Dell";
+    if (host.includes("hp.com")) return "HP";
+    if (host.includes("lenovo")) return "Lenovo";
+    if (host.includes("asus")) return "ASUS";
+    if (host.includes("acer")) return "Acer";
+    if (host.includes("belkin")) return "Belkin";
+    if (host.includes("syska")) return "Syska";
+    if (host.includes("anker")) return "Anker";
     return "";
   } catch {
     return "";

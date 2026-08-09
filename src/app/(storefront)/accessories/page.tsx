@@ -4,6 +4,7 @@ import { createClient } from "@/utils/supabase/server";
 import { ProductCard } from "@/components/storefront/ProductCard";
 import { PlpToolbar } from "@/components/storefront/PlpToolbar";
 import { PLP_PAGE_SIZE, PRODUCT_CARD_SELECT } from "@/lib/storefront/productQueries";
+import { hubCategoryChips } from "@/lib/storefront/nav";
 
 export const revalidate = 60;
 
@@ -53,6 +54,7 @@ async function ListingPage({
 
   const { data: products, count } = await query.range(from, to);
   const totalPages = Math.max(1, Math.ceil((count || 0) / PLP_PAGE_SIZE));
+  const subcats = hubCategoryChips("accessories");
 
   function pageHref(p: number) {
     const params = new URLSearchParams();
@@ -61,6 +63,15 @@ async function ListingPage({
     const q = params.toString();
     return q ? `${basePath}?${q}` : basePath;
   }
+
+  const chips = [
+    { label: chipLabel, href: basePath, active: true },
+    ...subcats.map((c) => ({
+      label: c.label,
+      href: c.href,
+      active: false,
+    })),
+  ];
 
   return (
     <div className="ms-plp min-h-screen bg-white">
@@ -74,7 +85,7 @@ async function ListingPage({
       </div>
 
       <PlpToolbar
-        chips={[{ label: chipLabel, href: basePath, active: true }]}
+        chips={chips}
         basePath={basePath}
         sortParam={sortFilter || null}
       />

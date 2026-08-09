@@ -4,18 +4,52 @@ import React, { useState, useMemo, useEffect } from "react";
 import { ShieldCheck, ShoppingCart, CheckCircle2, Info } from "lucide-react";
 import { useCartStore } from "@/store/useCartStore";
 import { sanitizeAppleImageUrl } from "@/lib/catalog/scraper/appleInPrices";
+import {
+  expandColorImagesForVariants,
+  resolveColorImageUrl,
+} from "@/lib/catalog/colorImages";
+import {
+  ChatWithSellerButton,
+  type ProductSellerContact,
+} from "@/components/storefront/ChatWithSellerButton";
 
 function fixImg(url?: string | null): string {
   if (!url) return "";
   return sanitizeAppleImageUrl(url) || url;
 }
 
-export default function ProductClient({ initialProduct }: { initialProduct: any }) {
-  const variants = initialProduct.variants || [];
+export default function ProductClient({
+  initialProduct,
+  sellerContact,
+  productUrl,
+}: {
+  initialProduct: any;
+  sellerContact: ProductSellerContact;
+  productUrl: string;
+}) {
+  const variants = useMemo(
+    () =>
+      (initialProduct.variants || []).filter(
+        (v: { status?: boolean | null }) => v.status !== false
+      ),
+    [initialProduct.variants]
+  );
   
   // Extract unique colors and storages from variants if attributes exist
   const hasAttributes = variants.length > 0 && variants[0].attributes;
-  
+
+  const isLaptop = useMemo(() => {
+    return variants.some(
+      (v: any) =>
+        v.attributes?.device_form === "laptop" ||
+        v.attributes?.cpu ||
+        v.attributes?.display_size
+    ) ||
+      String(initialProduct.specifications?.device_form || "") === "laptop" ||
+      String(initialProduct.specifications?.product_type || "") === "laptop" ||
+      String(initialProduct.categories?.slug || "").includes("laptop");
+  }, [variants, initialProduct]);
+
   const colors = useMemo(() => {
     if (!hasAttributes) return [];
     const colorSet = new Set(variants.map((v: any) => v.attributes?.color).filter(Boolean));
@@ -28,55 +62,118 @@ export default function ProductClient({ initialProduct }: { initialProduct: any 
     return Array.from(storageSet) as string[];
   }, [variants, hasAttributes]);
 
+  const rams = useMemo(() => {
+    if (!hasAttributes || !isLaptop) return [];
+    return Array.from(
+      new Set(variants.map((v: any) => v.attributes?.ram).filter(Boolean))
+    ) as string[];
+  }, [variants, hasAttributes, isLaptop]);
+
+  const cpus = useMemo(() => {
+    if (!hasAttributes || !isLaptop) return [];
+    return Array.from(
+      new Set(variants.map((v: any) => v.attributes?.cpu).filter(Boolean))
+    ) as string[];
+  }, [variants, hasAttributes, isLaptop]);
+
+  const displaySizes = useMemo(() => {
+    if (!hasAttributes || !isLaptop) return [];
+    return Array.from(
+      new Set(variants.map((v: any) => v.attributes?.display_size).filter(Boolean))
+    ) as string[];
+  }, [variants, hasAttributes, isLaptop]);
+
   const [selectedColor, setSelectedColor] = useState<string | null>(colors.length > 0 ? colors[0] : null);
   const [selectedStorage, setSelectedStorage] = useState<string | null>(storages.length > 0 ? storages[0] : null);
+  const [selectedRam, setSelectedRam] = useState<string | null>(rams.length > 0 ? rams[0] : null);
+  const [selectedCpu, setSelectedCpu] = useState<string | null>(cpus.length > 0 ? cpus[0] : null);
+  const [selectedDisplay, setSelectedDisplay] = useState<string | null>(
+    displaySizes.length > 0 ? displaySizes[0] : null
+  );
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(variants.length > 0 ? variants[0].id : null);
 
   const initialMainImage =
     fixImg(initialProduct.main_image_url) ||
     "https://placehold.co/800x1000/f8f9fa/a1a1aa?text=No+Image+Available";
 
-  // Color → single-phone image (variant image_url or master color_images)
+  const imageDedupeKey = (url: string) => {
+    try {
+      const u = new URL(url);
+      return `${u.host}${u.pathname}`.toLowerCase().replace(/\/+$/, "");
+    } catch {
+      return url.split("?")[0].toLowerCase();
+    }
+  };
+
+  // Color → image: prefer *published* product maps, fall back to master for gaps only
   const colorImageMap = useMemo(() => {
-    const map: Record<string, string> = {};
-    const put = (name: string, url: string) => {
+    const merged: Record<string, string> = {};
+    const put = (name: string, url: string, { overwrite = true } = {}) => {
       const fixed = fixImg(url);
       if (!name?.trim() || !fixed) return;
-      // One entry per color label (case-insensitive) — avoid duplicate Object.values
-      const existingKey = Object.keys(map).find(
+      const existingKey = Object.keys(merged).find(
         (k) => k.toLowerCase() === name.toLowerCase()
       );
-      if (existingKey) map[existingKey] = fixed;
-      else map[name] = fixed;
+      if (existingKey) {
+        if (overwrite) merged[existingKey] = fixed;
+        return;
+      }
+      merged[name] = fixed;
     };
-    const specColors = initialProduct.master_devices?.specifications?.color_images;
-    if (specColors && typeof specColors === "object") {
-      Object.entries(specColors).forEach(([k, v]) => {
-        if (typeof v === "string" && v) put(k, v);
-      });
-    }
+
     const pubColors = initialProduct.specifications?.color_images;
-    if (pubColors && typeof pubColors === "object") {
+    const hasPublishedColors =
+      pubColors &&
+      typeof pubColors === "object" &&
+      Object.keys(pubColors).length > 0;
+
+    // Published product selection first
+    if (hasPublishedColors) {
       Object.entries(pubColors).forEach(([k, v]) => {
         if (typeof v === "string" && v) put(k, v);
       });
     }
+
+    // Master only fills colors the product map doesn't cover
+    const masterColors =
+      initialProduct.master_devices?.specifications?.color_images;
+    if (masterColors && typeof masterColors === "object") {
+      Object.entries(masterColors).forEach(([k, v]) => {
+        if (typeof v !== "string" || !v) return;
+        const already = resolveColorImageUrl(k, merged);
+        if (already) return;
+        put(k, v, { overwrite: false });
+      });
+    }
+
+    // If nothing published yet, take full master map
+    if (!hasPublishedColors && masterColors && typeof masterColors === "object") {
+      Object.entries(masterColors).forEach(([k, v]) => {
+        if (typeof v === "string" && v) put(k, v);
+      });
+    }
+
+    const expanded = expandColorImagesForVariants(merged, colors);
+
+    const mainKey = imageDedupeKey(initialMainImage);
     variants.forEach((v: any) => {
       const c = v.attributes?.color;
-      if (c && v.image_url) put(c, v.image_url);
+      if (!c || !v.image_url) return;
+      const fixed = fixImg(v.image_url);
+      if (!fixed) return;
+      if (expanded[c]) return;
+      if (resolveColorImageUrl(c, expanded)) return;
+      if (imageDedupeKey(fixed) === mainKey) return;
+      expanded[c] = fixed;
     });
-    return map;
-  }, [variants, initialProduct]);
+
+    return expanded;
+  }, [variants, initialProduct, colors, initialMainImage]);
 
   const resolveColorImage = (colorName: string) => {
-    if (!colorName) return "";
-    return (
-      colorImageMap[colorName] ||
-      Object.entries(colorImageMap).find(
-        ([k]) => k.toLowerCase() === colorName.toLowerCase()
-      )?.[1] ||
-      ""
-    );
+    const direct = fixImg(resolveColorImageUrl(colorName, colorImageMap));
+    if (direct) return direct;
+    return "";
   };
 
   const getDynamicColor = (colorName: string) => {
@@ -128,15 +225,6 @@ export default function ProductClient({ initialProduct }: { initialProduct: any 
     return "#B0B0B0";
   };
 
-  const imageDedupeKey = (url: string) => {
-    try {
-      const u = new URL(url);
-      return `${u.host}${u.pathname}`.toLowerCase().replace(/\/+$/, "");
-    } catch {
-      return url.split("?")[0].toLowerCase();
-    }
-  };
-
   const galleryImages = useMemo(() => {
     const seen = new Set<string>();
     const images: string[] = [];
@@ -149,26 +237,114 @@ export default function ProductClient({ initialProduct }: { initialProduct: any 
       images.push(fixed);
     };
 
-    // One shot per color first
-    Object.values(colorImageMap).forEach(add);
+    const rows = Array.isArray(initialProduct.product_images)
+      ? [...initialProduct.product_images].sort(
+          (a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
+        )
+      : [];
+    const pubGallery = Array.isArray(initialProduct.specifications?.gallery_images)
+      ? (initialProduct.specifications.gallery_images as string[])
+      : [];
+    const masterGallery = Array.isArray(
+      initialProduct.master_devices?.specifications?.gallery_images
+    )
+      ? (initialProduct.master_devices.specifications.gallery_images as string[])
+      : [];
 
-    const rows = initialProduct.product_images;
-    if (Array.isArray(rows) && rows.length) {
-      [...rows]
-        .sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-        .forEach((r: any) => add(r.url));
+    // If admin published a curated set, NEVER pull the full master gallery
+    const hasPublishedGallery = rows.length > 0 || pubGallery.length > 0;
+
+    const publishedUrlSet = new Set<string>();
+    if (hasPublishedGallery) {
+      rows.forEach((r: any) => {
+        const f = fixImg(r.url);
+        if (f) publishedUrlSet.add(imageDedupeKey(f));
+      });
+      pubGallery.forEach((u) => {
+        const f = fixImg(u);
+        if (f) publishedUrlSet.add(imageDedupeKey(f));
+      });
+      const mainFixed = fixImg(initialMainImage);
+      if (mainFixed) publishedUrlSet.add(imageDedupeKey(mainFixed));
+      // Allow color heroes that were published on the product color map
+      const pubColors = initialProduct.specifications?.color_images;
+      if (pubColors && typeof pubColors === "object") {
+        Object.values(pubColors).forEach((u) => {
+          if (typeof u !== "string") return;
+          const f = fixImg(u);
+          if (f) publishedUrlSet.add(imageDedupeKey(f));
+        });
+      }
     }
 
-    add(initialMainImage);
+    const selectedColorUrl = selectedColor
+      ? resolveColorImage(selectedColor)
+      : "";
+    const selectedKey = selectedColorUrl
+      ? imageDedupeKey(selectedColorUrl)
+      : "";
+    const mainKey = imageDedupeKey(initialMainImage);
 
-    const specGallery = initialProduct.master_devices?.specifications?.gallery_images;
-    if (Array.isArray(specGallery)) specGallery.forEach(add);
+    const otherColorOnly = new Set<string>();
+    for (const [color, url] of Object.entries(colorImageMap)) {
+      const fixed = fixImg(url);
+      if (!fixed) continue;
+      const key = imageDedupeKey(fixed);
+      if (!key || key === mainKey) continue;
+      if (selectedKey && key === selectedKey) continue;
+      if (
+        selectedColor &&
+        resolveColorImage(color) &&
+        imageDedupeKey(resolveColorImage(color)) === selectedKey
+      ) {
+        continue;
+      }
+      if (selectedColor) {
+        const sameLabel =
+          color.toLowerCase() === selectedColor.toLowerCase() ||
+          resolveColorImageUrl(selectedColor, { [color]: fixed }) === fixed;
+        if (sameLabel) continue;
+      }
+      otherColorOnly.add(key);
+    }
 
-    const pubGallery = initialProduct.specifications?.gallery_images;
-    if (Array.isArray(pubGallery)) pubGallery.forEach(add);
+    const allowed = (u?: string | null) => {
+      const fixed = fixImg(u);
+      if (!fixed) return false;
+      const key = imageDedupeKey(fixed);
+      if (otherColorOnly.has(key)) return false;
+      if (hasPublishedGallery && !publishedUrlSet.has(key)) return false;
+      return true;
+    };
+
+    // 1) Selected color / main — only if allowed by publish set
+    if (selectedColorUrl && allowed(selectedColorUrl)) add(selectedColorUrl);
+    else if (allowed(initialMainImage)) add(initialMainImage);
+
+    // 2) Published product gallery (admin selection)
+    rows.forEach((r: any) => {
+      if (allowed(r.url)) add(r.url);
+    });
+    pubGallery.forEach((u) => {
+      if (allowed(u)) add(u);
+    });
+
+    // 3) Master gallery only when nothing was curated at publish
+    if (!hasPublishedGallery) {
+      masterGallery.forEach((u) => {
+        if (allowed(u)) add(u);
+      });
+    }
+
+    if (allowed(initialMainImage)) add(initialMainImage);
 
     return images.length ? images : [initialMainImage];
-  }, [initialMainImage, initialProduct, colorImageMap]);
+  }, [
+    initialMainImage,
+    initialProduct,
+    colorImageMap,
+    selectedColor,
+  ]);
 
   const [activeImage, setActiveImage] = useState<string>(
     (colors[0] && resolveColorImage(colors[0])) ||
@@ -176,9 +352,32 @@ export default function ProductClient({ initialProduct }: { initialProduct: any 
       initialMainImage
   );
 
-  // Auto-select variant based on color and storage
+  // Remember last color we auto-synced the hero for — avoids fighting thumb clicks
+  const lastAutoColorRef = React.useRef<string | null>(null);
+
+  // Auto-select variant based on laptop config or phone color×storage
   useEffect(() => {
-    if (hasAttributes && selectedColor && selectedStorage) {
+    if (!hasAttributes) return;
+    if (isLaptop) {
+      const match = variants.find((v: any) => {
+        const a = v.attributes || {};
+        if (selectedColor && a.color && a.color !== selectedColor) return false;
+        if (selectedStorage && a.storage && a.storage !== selectedStorage)
+          return false;
+        if (selectedRam && a.ram && a.ram !== selectedRam) return false;
+        if (selectedCpu && a.cpu && a.cpu !== selectedCpu) return false;
+        if (
+          selectedDisplay &&
+          a.display_size &&
+          a.display_size !== selectedDisplay
+        )
+          return false;
+        return true;
+      });
+      if (match) setSelectedVariantId(match.id);
+      return;
+    }
+    if (selectedColor && selectedStorage) {
       const match = variants.find(
         (v: any) =>
           v.attributes?.color === selectedColor &&
@@ -186,17 +385,47 @@ export default function ProductClient({ initialProduct }: { initialProduct: any 
       );
       if (match) setSelectedVariantId(match.id);
     }
-  }, [selectedColor, selectedStorage, variants, hasAttributes]);
+  }, [
+    selectedColor,
+    selectedStorage,
+    selectedRam,
+    selectedCpu,
+    selectedDisplay,
+    variants,
+    hasAttributes,
+    isLaptop,
+  ]);
 
-  // Switch hero to the single-phone shot for the selected color
+  // Only when the *color* changes: jump hero to that color's shot.
+  // Do NOT re-run on galleryImages/activeImage — that steals thumb clicks.
   useEffect(() => {
     if (!selectedColor) return;
-    const fromVariant = variants.find(
-      (v: any) => v.attributes?.color === selectedColor && v.image_url
-    )?.image_url;
-    const next = fixImg(fromVariant) || resolveColorImage(selectedColor);
+    if (lastAutoColorRef.current === selectedColor) return;
+    lastAutoColorRef.current = selectedColor;
+
+    const mapped = resolveColorImage(selectedColor);
+    const fromVariant = fixImg(
+      variants.find(
+        (v: any) => v.attributes?.color === selectedColor && v.image_url
+      )?.image_url
+    );
+    const mainKey = imageDedupeKey(initialMainImage);
+    const mappedIsSpecific = mapped && imageDedupeKey(mapped) !== mainKey;
+    const variantIsSpecific =
+      fromVariant && imageDedupeKey(fromVariant) !== mainKey;
+
+    const next =
+      (mappedIsSpecific ? mapped : "") ||
+      (variantIsSpecific ? fromVariant : "") ||
+      mapped ||
+      fromVariant ||
+      initialMainImage;
     if (next) setActiveImage(next);
-  }, [selectedColor, colorImageMap, variants]);
+  }, [selectedColor, variants, initialMainImage, colorImageMap]);
+
+  const pickGalleryImage = (img: string) => {
+    setActiveImage(img);
+  };
 
   const selectedVariant = variants.find((v: any) => v.id === selectedVariantId) || null;
 
@@ -213,6 +442,41 @@ export default function ProductClient({ initialProduct }: { initialProduct: any 
       : 0;
   
   const isUsed = initialProduct.type === "used_mobile";
+
+  const attrs = selectedVariant?.attributes || {};
+  const whatsappMessageInput = useMemo(
+    () => ({
+      productName: String(initialProduct.name || ""),
+      brandName: initialProduct.brand?.name || null,
+      storeName: sellerContact.name || null,
+      variantLabel: selectedVariant?.name || null,
+      ram: selectedRam || attrs.ram || null,
+      storage: selectedStorage || attrs.storage || null,
+      color: selectedColor || attrs.color || null,
+      cpu: selectedCpu || attrs.cpu || null,
+      displaySize: selectedDisplay || attrs.display_size || null,
+      price: Number(displayPrice) || null,
+      productUrl,
+    }),
+    [
+      initialProduct.name,
+      initialProduct.brand?.name,
+      sellerContact.name,
+      selectedVariant?.name,
+      selectedRam,
+      selectedStorage,
+      selectedColor,
+      selectedCpu,
+      selectedDisplay,
+      attrs.ram,
+      attrs.storage,
+      attrs.color,
+      attrs.cpu,
+      attrs.display_size,
+      displayPrice,
+      productUrl,
+    ]
+  );
 
   // Starting "From" price = cheapest active variant
   const fromPrice = useMemo(() => {
@@ -275,7 +539,7 @@ export default function ProductClient({ initialProduct }: { initialProduct: any 
                     <button
                       key={imageDedupeKey(img)}
                       type="button"
-                      onClick={() => setActiveImage(img)}
+                      onClick={() => pickGalleryImage(img)}
                       className={`w-20 h-20 md:w-24 md:h-24 flex-shrink-0 rounded-2xl p-2 border-2 transition-all bg-[#f5f5f7] ${
                         selected
                           ? "border-[#0071e3] ring-1 ring-[#0071e3]"
@@ -313,6 +577,78 @@ export default function ProductClient({ initialProduct }: { initialProduct: any 
                   This device has passed a rigorous 20-point hardware and software inspection.
                   Backed by our premium quality guarantee.
                 </p>
+              </div>
+            </div>
+          )}
+
+          {hasAttributes && isLaptop && displaySizes.length > 0 && (
+            <div className="mb-12">
+              <h3 className="text-2xl font-semibold text-[#1d1d1f] tracking-tight mb-6">
+                <span className="text-[#6e6e73]">Display.</span> Pick your screen size.
+              </h3>
+              <div className="grid grid-cols-2 gap-4">
+                {displaySizes.map((size) => (
+                  <button
+                    key={size}
+                    type="button"
+                    onClick={() => setSelectedDisplay(size)}
+                    className={`border-2 rounded-2xl p-5 text-center transition-all ${
+                      selectedDisplay === size
+                        ? "border-[#0071e3] bg-[#0071e3]/5 ring-1 ring-[#0071e3]"
+                        : "border-[#d2d2d7] hover:border-[#6e6e73]"
+                    }`}
+                  >
+                    <span className="text-xl font-semibold text-[#1d1d1f]">{size}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {hasAttributes && isLaptop && cpus.length > 0 && (
+            <div className="mb-12">
+              <h3 className="text-2xl font-semibold text-[#1d1d1f] tracking-tight mb-6">
+                <span className="text-[#6e6e73]">Processor.</span> Choose your chip.
+              </h3>
+              <div className="grid grid-cols-1 gap-3">
+                {cpus.map((cpu) => (
+                  <button
+                    key={cpu}
+                    type="button"
+                    onClick={() => setSelectedCpu(cpu)}
+                    className={`border-2 rounded-2xl p-5 text-left transition-all ${
+                      selectedCpu === cpu
+                        ? "border-[#0071e3] bg-[#0071e3]/5 ring-1 ring-[#0071e3]"
+                        : "border-[#d2d2d7] hover:border-[#6e6e73]"
+                    }`}
+                  >
+                    <span className="text-lg font-semibold text-[#1d1d1f]">{cpu}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {hasAttributes && isLaptop && rams.length > 0 && (
+            <div className="mb-12">
+              <h3 className="text-2xl font-semibold text-[#1d1d1f] tracking-tight mb-6">
+                <span className="text-[#6e6e73]">Memory.</span> How much RAM?
+              </h3>
+              <div className="grid grid-cols-2 gap-4">
+                {rams.map((ram) => (
+                  <button
+                    key={ram}
+                    type="button"
+                    onClick={() => setSelectedRam(ram)}
+                    className={`border-2 rounded-2xl p-5 text-center transition-all ${
+                      selectedRam === ram
+                        ? "border-[#0071e3] bg-[#0071e3]/5 ring-1 ring-[#0071e3]"
+                        : "border-[#d2d2d7] hover:border-[#6e6e73]"
+                    }`}
+                  >
+                    <span className="text-2xl font-semibold text-[#1d1d1f]">{ram}</span>
+                  </button>
+                ))}
               </div>
             </div>
           )}
@@ -356,7 +692,10 @@ export default function ProductClient({ initialProduct }: { initialProduct: any 
           {hasAttributes && storages.length > 0 && (
             <div className="mb-12">
               <h3 className="text-2xl font-semibold text-[#1d1d1f] tracking-tight mb-6">
-                <span className="text-[#6e6e73]">Storage.</span> How much space do you need?
+                <span className="text-[#6e6e73]">
+                  {isLaptop ? "SSD." : "Storage."}
+                </span>{" "}
+                How much space do you need?
               </h3>
 
               <div className="grid grid-cols-2 gap-4">
@@ -364,7 +703,15 @@ export default function ProductClient({ initialProduct }: { initialProduct: any 
                   const storageVariant = variants.find(
                     (v: any) =>
                       v.attributes?.storage === storage &&
-                      (!selectedColor || v.attributes?.color === selectedColor)
+                      (!selectedColor || v.attributes?.color === selectedColor) &&
+                      (!isLaptop ||
+                        !selectedRam ||
+                        !v.attributes?.ram ||
+                        v.attributes.ram === selectedRam) &&
+                      (!isLaptop ||
+                        !selectedCpu ||
+                        !v.attributes?.cpu ||
+                        v.attributes.cpu === selectedCpu)
                   );
                   const storagePrice = storageVariant?.selling_price;
                   return (
@@ -491,6 +838,12 @@ export default function ProductClient({ initialProduct }: { initialProduct: any 
               <ShoppingCart size={20} />
               {displayStock > 0 ? "Add to Bag" : "Currently Unavailable"}
             </button>
+
+            <ChatWithSellerButton
+              seller={sellerContact}
+              messageInput={whatsappMessageInput}
+              disabled={!initialProduct?.id || !productUrl}
+            />
 
             {displayStock > 0 && (
               <div className="text-center mt-6 text-[#6e6e73] text-sm flex items-center justify-center gap-2">

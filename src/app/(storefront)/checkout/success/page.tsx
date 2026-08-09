@@ -28,7 +28,8 @@ function SuccessContent() {
       )}
 
       <div className="text-sm text-gray-500 mb-10 text-left bg-blue-50/50 p-4 rounded-xl border border-blue-100/50">
-        We will send an order confirmation email with tracking details once your item ships. You can track the status of your order in your account dashboard.
+        Our team has been notified of your order. You can track status anytime from your account
+        dashboard. For questions, use Chat with Seller on the product page or call the store.
       </div>
 
       <div className="flex flex-col gap-3">

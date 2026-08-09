@@ -3,6 +3,7 @@ import { ArrowUpRight } from "lucide-react";
 import { createClient } from "@/utils/supabase/server";
 import { HomeHero } from "@/components/storefront/home/HomeHero";
 import { HomeBrandRail } from "@/components/storefront/home/HomeBrandRail";
+import { HomeCategoryBrowse } from "@/components/storefront/home/HomeCategoryBrowse";
 import { HomePhoneFinder } from "@/components/storefront/home/HomePhoneFinder";
 import { HomeOffersAndTrust } from "@/components/storefront/home/HomeOffersAndTrust";
 import { HomeProductTile, type HomeProduct } from "@/components/storefront/home/HomeProductTile";
@@ -113,6 +114,8 @@ export default async function HomePage() {
       <HomeHero featured={heroProducts} />
 
       <HomeBrandRail brands={brands} />
+
+      <HomeCategoryBrowse />
 
       {/* Just landed */}
       <section id="launches" className="ms-section" aria-labelledby="launches-heading">

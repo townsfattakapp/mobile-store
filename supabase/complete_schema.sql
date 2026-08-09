@@ -331,6 +331,8 @@ CREATE TABLE IF NOT EXISTS master_device_variants (
     ram TEXT, -- e.g., '12GB'
     storage TEXT, -- e.g., '256GB'
     color TEXT,
+    cpu TEXT, -- laptop: e.g. Intel Core Ultra 7
+    display_size TEXT, -- laptop: e.g. 15.6″
     reference_image_url TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()

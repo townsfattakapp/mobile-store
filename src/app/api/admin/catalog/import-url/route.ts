@@ -66,6 +66,70 @@ async function saveScrapedDevice(fetchedData: any) {
     String(fetchedData.model_name || "").split(" ")[0] ||
     "Unknown";
 
+  // No duplicate master rows — reopen existing entry (refresh weak specs if needed)
+  if (fetchedData.slug) {
+    const { data: existingMaster } = await supabase
+      .from("master_devices")
+      .select("id, model_name, specifications")
+      .eq("slug", fetchedData.slug)
+      .maybeSingle();
+    if (existingMaster) {
+      const incomingSpecs = fetchedData.specifications || {};
+      const hasSections =
+        Array.isArray((incomingSpecs as any).spec_sections) &&
+        (incomingSpecs as any).spec_sections.length > 0;
+      if (hasSections || Object.keys(incomingSpecs).length > 0) {
+        const prev = (existingMaster.specifications || {}) as Record<string, unknown>;
+        const merged = {
+          ...prev,
+          ...incomingSpecs,
+          // Prefer richer gallery/images from previous if new scrape thinned them
+          gallery_images:
+            (incomingSpecs as any).gallery_images?.length
+              ? (incomingSpecs as any).gallery_images
+              : prev.gallery_images,
+          color_images:
+            (incomingSpecs as any).color_images &&
+            Object.keys((incomingSpecs as any).color_images).length
+              ? (incomingSpecs as any).color_images
+              : prev.color_images,
+          main_image_url:
+            (incomingSpecs as any).main_image_url || prev.main_image_url,
+        };
+        delete (merged as any).source_url;
+        delete (merged as any).condition_source;
+        await supabase
+          .from("master_devices")
+          .update({ specifications: merged })
+          .eq("id", existingMaster.id);
+      }
+      return {
+        deviceId: existingMaster.id,
+        skipped: true,
+        message: `Already in Master Catalog (“${existingMaster.model_name}”). Opened existing entry.`,
+      };
+    }
+  }
+
+  const cleanedPreview = formatStoreProductName(
+    fetchedData.model_name,
+    brandName
+  );
+  const { data: existingProduct } = await supabase
+    .from("products")
+    .select("id, name")
+    .ilike("name", cleanedPreview)
+    .limit(1)
+    .maybeSingle();
+  if (existingProduct) {
+    throw Object.assign(
+      new Error(
+        `Duplicate blocked: store already has “${existingProduct.name}”. Edit that product instead.`
+      ),
+      { duplicate: true, existingProductId: existingProduct.id }
+    );
+  }
+
   let brandId: string | null = null;
   const { data: existingBrand } = await supabase
     .from("brands")
@@ -324,6 +388,11 @@ export async function POST(req: NextRequest) {
           error: "No product data found for this URL.",
         });
       }
+
+      const { enrichFetchedDeviceWithGsmArenaSpecs } = await import(
+        "@/lib/catalog/enrichPhoneSpecs"
+      );
+      fetched = await enrichFetchedDeviceWithGsmArenaSpecs(fetched);
 
       const saved = await saveScrapedDevice(fetched);
       return NextResponse.json({

@@ -4,6 +4,7 @@ import { createClient } from "@/utils/supabase/server";
 import { ProductCard } from "@/components/storefront/ProductCard";
 import { PlpToolbar } from "@/components/storefront/PlpToolbar";
 import { PLP_PAGE_SIZE, PRODUCT_CARD_SELECT } from "@/lib/storefront/productQueries";
+import { hubCategoryChips } from "@/lib/storefront/nav";
 
 export const revalidate = 60;
 
@@ -35,6 +36,7 @@ export default async function SparePartsPage({
 
   const { data: products, count } = await query.range(from, to);
   const totalPages = Math.max(1, Math.ceil((count || 0) / PLP_PAGE_SIZE));
+  const subcats = hubCategoryChips("parts");
 
   function pageHref(p: number) {
     const params = new URLSearchParams();
@@ -43,6 +45,15 @@ export default async function SparePartsPage({
     const q = params.toString();
     return q ? `/parts?${q}` : "/parts";
   }
+
+  const chips = [
+    { label: "All Parts", href: "/parts", active: true },
+    ...subcats.map((c) => ({
+      label: c.label,
+      href: c.href,
+      active: false,
+    })),
+  ];
 
   return (
     <div className="ms-plp min-h-screen bg-white">
@@ -55,11 +66,7 @@ export default async function SparePartsPage({
         </div>
       </div>
 
-      <PlpToolbar
-        chips={[{ label: "All Parts", href: "/parts", active: true }]}
-        basePath="/parts"
-        sortParam={sortFilter || null}
-      />
+      <PlpToolbar chips={chips} basePath="/parts" sortParam={sortFilter || null} />
 
       <div className="ms-plp-grid-wrap">
         {products && products.length > 0 ? (

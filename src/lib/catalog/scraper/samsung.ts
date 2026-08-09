@@ -21,6 +21,12 @@ const BUDS_TYPE = "01040000";
 function samsungTypeFromUrl(pageUrl: string): string[] {
   try {
     const path = new URL(pageUrl).pathname.toLowerCase();
+    // Computers / Galaxy Book / monitors — not mobile finder API
+    if (/\/computers|galaxy-book|\/monitors|all-monitors/i.test(path)) {
+      if (/monitor/i.test(path)) return ["07010000"];
+      // Empty → CategoryScraper falls through to HTML link extraction
+      return [];
+    }
     if (/all-tablets|\/tablets/i.test(path)) return [TABLET_TYPE];
     if (/all-watches|\/watches/i.test(path)) return [WATCH_TYPE];
     if (/buds|audio|wearables/i.test(path) && /all-|audio/i.test(path))
@@ -58,10 +64,123 @@ export function isSamsungListingUrl(url: string): boolean {
     if (/\/mobile$/i.test(path)) return true;
     if (/\/all-tablets$|\/all-watches$|\/all-mobile-accessories$/i.test(path))
       return true;
+    if (/\/all-computers$/i.test(path) || /\/computers\/?$/i.test(path))
+      return true;
+    // Galaxy Book family hubs only — SKUs embed "-np750..." in the last segment
+    if (
+      /\/galaxy-book\/?$/i.test(path) ||
+      (/\/computers\/galaxy-book\/?$/i.test(path) && !/-np[0-9a-z-]+/i.test(path))
+    ) {
+      return true;
+    }
+    if (/\/galaxy-book/i.test(path) && !/-np[0-9a-z-]+/i.test(path) && !/\/np[0-9a-z-]+/i.test(path))
+      return true;
+    if (/\/monitors(\/|$)|\/all-monitors$/i.test(path)) return true;
     return false;
   } catch {
     return false;
   }
+}
+
+/** Parse Galaxy Book / computer PDPs out of Samsung computers hub HTML. */
+export function extractSamsungComputerLinksFromHtml(
+  html: string,
+  pageUrl: string
+): SamsungCatalogItem[] {
+  const origin = "https://www.samsung.com";
+  const seen = new Set<string>();
+  const items: SamsungCatalogItem[] = [];
+  const re =
+    /\/in\/computers\/galaxy-book\/(galaxy-book[a-z0-9\-]*?np[a-z0-9\-]+)\/?/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const slug = m[1].replace(/\/+$/, "").toLowerCase();
+    if (seen.has(slug)) continue;
+    seen.add(slug);
+    const path = `/in/computers/galaxy-book/${slug}/`;
+    const name = slug
+      .replace(/-np[a-z0-9\-]+$/i, "")
+      .split("-")
+      .filter(Boolean)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(" ");
+    items.push({
+      name: name || slug,
+      url: `${origin}${path}`,
+    });
+  }
+  return items;
+}
+
+/** Galaxy Book / computer SKU pages: …-np750xgj-lg2in/ */
+export function isSamsungComputerProductUrl(url: string): boolean {
+  if (!isSamsungHost(url)) return false;
+  try {
+    const path = new URL(url).pathname.toLowerCase();
+    return (
+      /\/computers\/galaxy-book\//i.test(path) &&
+      /-np[0-9a-z-]+/i.test(path)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Parse schema.org Product JSON-LD (Galaxy Book pages often lack ProductGroup).
+ */
+export function parseSamsungProductJsonLd(html: string): {
+  modelName: string;
+  description: string;
+  price: number;
+  image: string;
+  sku: string;
+} | null {
+  const blocks = [
+    ...html.matchAll(
+      /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi
+    ),
+  ];
+  for (const m of blocks) {
+    try {
+      const parsed = JSON.parse(m[1]);
+      const nodes = Array.isArray(parsed) ? parsed : [parsed];
+      const queue = [...nodes];
+      while (queue.length) {
+        const n = queue.shift();
+        if (!n || typeof n !== "object") continue;
+        if (Array.isArray(n["@graph"])) queue.push(...n["@graph"]);
+        const type = String(n["@type"] || "");
+        if (!/Product$/i.test(type) || /ProductGroup/i.test(type)) continue;
+        const offers = Array.isArray(n.offers) ? n.offers[0] : n.offers;
+        const price =
+          Math.round(parseFloat(String(offers?.price || offers?.lowPrice || "0"))) ||
+          0;
+        const imageRaw = n.image;
+        const image =
+          typeof imageRaw === "string"
+            ? absSamsungUrl(imageRaw)
+            : Array.isArray(imageRaw)
+              ? absSamsungUrl(String(imageRaw[0] || ""))
+              : absSamsungUrl(String(imageRaw?.url || ""));
+        const modelName = String(n.name || "")
+          .replace(/\s*[|–—].*$/, "")
+          .replace(/\s+/g, " ")
+          .trim();
+        if (!modelName) continue;
+        return {
+          modelName,
+          description: String(n.description || "").slice(0, 500),
+          price,
+          image,
+          sku: String(n.sku || offers?.sku || ""),
+        };
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return null;
 }
 
 export function isSamsungProductUrl(url: string): boolean {
@@ -73,6 +192,8 @@ export function isSamsungProductUrl(url: string): boolean {
     if (/\/buy\/?$/i.test(path)) return true;
     // SKU deep links: …-sm-e476…/ or certified …-sm5s938…/
     if (/\bsm-?[a-z0-9]{6,}\b/i.test(path)) return true;
+    // Galaxy Book configs
+    if (isSamsungComputerProductUrl(url)) return true;
     // /in/smartphones/galaxy-s26-ultra/ (not series hub /galaxy-s/)
     if (
       /\/smartphones\/galaxy-[a-z0-9-]+/i.test(path) &&
@@ -400,6 +521,8 @@ function pickSpec(
 export function toSamsungIndiaModelCode(sku: string, siteCode = "in"): string {
   let code = String(sku || "").trim().toUpperCase();
   if (!code) return "";
+  // Galaxy Book / PC SKUs (NP…) — do not append INS
+  if (/^NP/i.test(code)) return code;
   // Normalize SM5XXXX (certified renewed) and SMXXXX without hyphen
   if (/^SM[0-9A-Z]/i.test(code) && !code.startsWith("SM-") && !/^SM5/i.test(code)) {
     code = code.replace(/^SM/i, "SM-");
@@ -415,9 +538,12 @@ export function extractSamsungModelCodeFromUrl(url: string): string | null {
   try {
     const u = new URL(url);
     const smc = u.searchParams.get("smc") || u.searchParams.get("modelCode");
-    if (smc && /^SM/i.test(smc.trim())) return smc.trim().toUpperCase();
+    if (smc && /^(SM|NP)/i.test(smc.trim())) return smc.trim().toUpperCase();
 
     const path = u.pathname.toLowerCase();
+    // Galaxy Book: ...-np750xgj-lg2in/
+    const np = path.match(/-(np[0-9a-z]+(?:-[a-z0-9]+)?)\b/i);
+    if (np) return np[1].toUpperCase();
     // Standard: ...-sm-e476bzkbins/  or certified: ...-sm5s938bzbbins/
     const m =
       path.match(/-(sm-[a-z0-9]+)\b/i) ||
@@ -428,6 +554,7 @@ export function extractSamsungModelCodeFromUrl(url: string): string | null {
     /* ignore */
   }
   const m2 =
+    String(url).match(/-(np[0-9a-z]+(?:-[a-z0-9]+)?)\b/i) ||
     String(url).match(/-(sm-[a-z0-9]+)\b/i) ||
     String(url).match(/-(sm5[a-z0-9]+)\b/i) ||
     String(url).match(/\b(sm-[a-z0-9]+)\b/i);

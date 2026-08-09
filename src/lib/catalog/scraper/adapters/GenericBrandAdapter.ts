@@ -41,6 +41,27 @@ export class GenericBrandAdapter implements ScraperAdapter {
     "boat-lifestyle.com": "boAt",
     "noise.tech": "Noise",
     "gonoise.com": "Noise",
+    "stuffcool.com": "Stuffcool",
+    "fireboltt.com": "Fire-Boltt",
+    "goboult.co.in": "Boult",
+    "boult.audio": "Boult",
+    "ptron.in": "pTron",
+    "ubonindia.com": "UBON",
+    "portronics.com": "Portronics",
+    "spigen.in": "Spigen",
+    "zebronics.com": "Zebronics",
+    "nurepublic.co": "Nu Republic",
+    "urbnworld.com": "URBN",
+    "syska.co.in": "Syska",
+    "belkin.com": "Belkin",
+    "anker.com": "Anker",
+    "ankerlndiastore.com": "Anker",
+    "dell.com": "Dell",
+    "hp.com": "HP",
+    "lenovo.com": "Lenovo",
+    "store.acer.com": "Acer",
+    "acer.com": "Acer",
+    "asus.com": "ASUS",
     "tecno-mobile.com": "Tecno",
     "tecno-mobile.in": "Tecno",
     "infinixmobility.com": "Infinix",
@@ -57,13 +78,32 @@ export class GenericBrandAdapter implements ScraperAdapter {
     // Never treat brand hubs / category pages as a single device
     if (await this.shouldRefuseAsHub(url)) return null;
 
+    // OEM sites that block scrapers (Dell 403 / Acer down): marketplace rebuild
+    {
+      const { isOemStoreHost, isOemProductUrl } = await import("../oemStores");
+      const blockedHtml =
+        !html ||
+        /access denied|403 forbidden|request unsuccessful|site map of all products/i.test(
+          html.slice(0, 2500)
+        );
+      if (isOemStoreHost(url) && isOemProductUrl(url) && blockedHtml) {
+        const fromMarket = await this.scrapeViaMarketplaceOnly(url);
+        if (fromMarket) return fromMarket;
+      }
+    }
+
     // Samsung buy pages: ProductGroup JSON-LD (colors × storage × prices)
     if (/samsung\.com/i.test(url)) {
       const samsung = await this.scrapeSamsung(url, html);
       if (samsung) return samsung;
-      const { isSamsungProductUrl, extractSamsungModelCodeFromUrl } =
+      const { isSamsungProductUrl, extractSamsungModelCodeFromUrl, isSamsungComputerProductUrl } =
         await import("../samsung");
-      if (isSamsungProductUrl(url) || extractSamsungModelCodeFromUrl(url)) {
+      // Phones/tablets with SM codes only — refuse fallthrough to junk HTML
+      // Galaxy Book may need JSON-LD Product scrape via scrapeHtml
+      if (
+        (isSamsungProductUrl(url) || extractSamsungModelCodeFromUrl(url)) &&
+        !isSamsungComputerProductUrl(url)
+      ) {
         return null;
       }
     }
@@ -111,7 +151,95 @@ export class GenericBrandAdapter implements ScraperAdapter {
     html = await this.enrichWithConfigScripts(url, html);
 
     const scraped = await this.scrapeHtml(url, html);
-    return (await this.maybeRebuildFromMarketplace(url, scraped)) as any;
+    const rebuilt = (await this.maybeRebuildFromMarketplace(url, scraped)) as any;
+    if (rebuilt?.model_name) return rebuilt;
+
+    // Dell / Acer / HP weak HTML → marketplace last resort
+    {
+      const { isOemStoreHost, isOemProductUrl } = await import("../oemStores");
+      if (isOemStoreHost(url) && isOemProductUrl(url)) {
+        const market = await this.scrapeViaMarketplaceOnly(url);
+        if (market) return market;
+      }
+    }
+    return rebuilt;
+  }
+
+  private async scrapeViaMarketplaceOnly(
+    url: string
+  ): Promise<Partial<MasterDevice> | null> {
+    const {
+      buildMarketplaceDevice,
+      marketplaceDeviceToPartial,
+    } = await import("../marketplaceVariants");
+    const { brandHintFromUrl, modelNameFromProductUrl } = await import(
+      "../enrichMarketplace"
+    );
+    const brandHint =
+      this.brandFromUrl(url) ||
+      this.brandFromHostname(url) ||
+      brandHintFromUrl(url);
+    const guess = modelNameFromProductUrl(url);
+    if (!brandHint || !guess || guess.length < 3) return null;
+    // Prefer path names like "Inspiron 15" over "Laptop Inspiron 15"
+    const cleaned = guess
+      .replace(/^(Laptop|Notebook|Pc|Shop)\s+/i, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (
+      /site\s*map|access\s*denied|all products|solutions/i.test(cleaned)
+    ) {
+      return null;
+    }
+    const built = await buildMarketplaceDevice(
+      `${brandHint} ${cleaned}`.replace(/\s+/g, " "),
+      brandHint
+    );
+    if (built) {
+      return marketplaceDeviceToPartial(
+        built,
+        `scraper_${brandHint.toLowerCase()}`
+      );
+    }
+    // Last resort stub so Dell/Acer “Add” still creates a master row
+    return {
+      brand_id: "",
+      brand_name: brandHint,
+      model_name: cleanScrapedModelName(`${brandHint} ${cleaned}`, brandHint),
+      slug: `${brandHint}-${cleaned}`
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, ""),
+      release_year: new Date().getFullYear(),
+      source_provider: `scraper_${brandHint.toLowerCase()}`,
+      specifications: {
+        processor: "—",
+        display: "—",
+        camera: "—",
+        battery: "—",
+        os: "Windows",
+        dimensions: "—",
+        weight: "—",
+        description: `${brandHint} ${cleaned} — pricing unavailable from manufacturer; enter MRP manually.`,
+        gallery_images: [],
+        product_type: "laptop",
+        currency: "INR",
+        price_source: "oem_stub",
+      },
+      main_image_url: "",
+      variants: [
+        {
+          id: "",
+          master_device_id: "",
+          ram: "",
+          storage: "",
+          color: "Standard",
+          reference_image_url: "",
+          mrp: 0,
+          selling_price: 0,
+        },
+      ] as any,
+    } as any;
   }
 
   private async shouldRefuseAsHub(url: string): Promise<boolean> {
@@ -438,6 +566,7 @@ export class GenericBrandAdapter implements ScraperAdapter {
   ): Promise<Partial<MasterDevice> | null> {
     const {
       parseSamsungProductGroup,
+      parseSamsungProductJsonLd,
       isSamsungProductUrl,
       fetchSamsungFullSpecs,
       extractSamsungModelCodeFromUrl,
@@ -445,12 +574,18 @@ export class GenericBrandAdapter implements ScraperAdapter {
       resolveSamsungModelCodeFromUrl,
     } = await import("../samsung");
     const modelFromUrl = extractSamsungModelCodeFromUrl(url);
-    if (!isSamsungProductUrl(url) && !/\/buy\/?/i.test(url) && !modelFromUrl) {
+    if (
+      !isSamsungProductUrl(url) &&
+      !/\/buy\/?/i.test(url) &&
+      !modelFromUrl
+    ) {
       return null;
     }
 
     const siteCode =
       url.match(/samsung\.com\/([a-z]{2})\b/i)?.[1]?.toLowerCase() || "in";
+    const isComputer = /\/computers\/|galaxy-book|-np[0-9a-z]/i.test(url);
+    const simpleProduct = html ? parseSamsungProductJsonLd(html) : null;
 
     let group = html ? parseSamsungProductGroup(html) : null;
     // Family pages without ProductGroup: try /buy/ (skip SKU deep-links — they use API fallback)
@@ -483,72 +618,134 @@ export class GenericBrandAdapter implements ScraperAdapter {
       const apiDevice = resolved
         ? await fetchSamsungDeviceByModelCode(resolved, siteCode)
         : null;
-      if (!apiDevice) return null;
 
-      const gallery = apiDevice.gallery.filter((u) => !isJunkBrandImage(u));
-      const mainImageUrl = gallery[0] || "";
-      const colorImages: Record<string, string> = {};
-      for (const v of apiDevice.variants) {
-        if (v.color && v.image && !isJunkBrandImage(v.image)) {
-          colorImages[v.color] = v.image;
+      if (apiDevice) {
+        const gallery = apiDevice.gallery.filter((u) => !isJunkBrandImage(u));
+        let mainImageUrl = gallery[0] || simpleProduct?.image || "";
+        if (simpleProduct?.image && !gallery.includes(simpleProduct.image)) {
+          gallery.unshift(simpleProduct.image);
+          mainImageUrl = simpleProduct.image;
         }
-      }
-      const variants = apiDevice.variants.map((v) => ({
-        id: "",
-        master_device_id: "",
-        ram: v.ram || "",
-        storage: v.storage || "",
-        color: v.color,
-        reference_image_url: v.image || mainImageUrl,
-        mrp: v.price,
-        selling_price: v.price,
-      }));
-      const starting =
-        apiDevice.startingPrice ||
-        variants.map((v) => v.selling_price).filter((p) => p > 0)[0] ||
-        0;
-      const fullSpecs = apiDevice.specs;
+        const colorImages: Record<string, string> = {};
+        for (const v of apiDevice.variants) {
+          if (v.color && v.image && !isJunkBrandImage(v.image)) {
+            colorImages[v.color] = v.image;
+          }
+        }
+        const variants = apiDevice.variants.map((v) => ({
+          id: "",
+          master_device_id: "",
+          ram: v.ram || "",
+          storage: v.storage || "",
+          color: v.color,
+          reference_image_url: v.image || mainImageUrl,
+          mrp: v.price || simpleProduct?.price || 0,
+          selling_price: v.price || simpleProduct?.price || 0,
+        }));
+        const starting =
+          apiDevice.startingPrice ||
+          simpleProduct?.price ||
+          variants.map((v) => v.selling_price).filter((p) => p > 0)[0] ||
+          0;
+        const fullSpecs = apiDevice.specs;
 
-      return {
-        brand_id: "",
-        brand_name: "Samsung",
-        model_name: cleanScrapedModelName(apiDevice.modelName, "Samsung"),
-        slug: `samsung-${apiDevice.modelName}`
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, "-"),
-        release_year: new Date().getFullYear(),
-        source_provider: "scraper_samsung",
-        specifications: {
-          processor: fullSpecs?.processor || "—",
-          display: fullSpecs?.display || "—",
-          camera: fullSpecs?.camera || "—",
-          battery: fullSpecs?.battery || "—",
-          os: fullSpecs?.os || "Android",
-          dimensions: fullSpecs?.dimensions || "—",
-          weight: fullSpecs?.weight || "—",
-          description: apiDevice.description,
-          gallery_images: gallery.slice(0, 10),
-          color_images: colorImages,
-          mrp: starting || undefined,
-          selling_price: starting || undefined,
-          currency: "INR",
-          price_source: "samsung_card_api",
-          product_type: "mobile",
-          model_sku: apiDevice.modelSku,
-          tech_specs: fullSpecs?.tech_specs || {},
-          spec_sections: fullSpecs?.spec_sections || [],
-          variant_pricing: variants.map((v) => ({
-            color: v.color,
-            storage: v.storage,
-            ram: v.ram,
-            mrp: v.mrp,
-            selling_price: v.selling_price,
-            image: v.reference_image_url,
-          })),
-        },
-        main_image_url: mainImageUrl,
-        variants: variants as any,
-      } as any;
+        return {
+          brand_id: "",
+          brand_name: "Samsung",
+          model_name: cleanScrapedModelName(
+            apiDevice.modelName || simpleProduct?.modelName || "Galaxy Book",
+            "Samsung"
+          ),
+          slug: `samsung-${apiDevice.modelName || simpleProduct?.modelName || "galaxy-book"}`
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-"),
+          release_year: new Date().getFullYear(),
+          source_provider: "scraper_samsung",
+          specifications: {
+            processor: fullSpecs?.processor || "—",
+            display: fullSpecs?.display || "—",
+            camera: fullSpecs?.camera || "—",
+            battery: fullSpecs?.battery || "—",
+            os: fullSpecs?.os || (isComputer ? "Windows" : "Android"),
+            dimensions: fullSpecs?.dimensions || "—",
+            weight: fullSpecs?.weight || "—",
+            description:
+              apiDevice.description || simpleProduct?.description || "",
+            gallery_images: gallery.slice(0, 10),
+            color_images: colorImages,
+            mrp: starting || undefined,
+            selling_price: starting || undefined,
+            currency: "INR",
+            price_source: starting
+              ? apiDevice.startingPrice
+                ? "samsung_card_api"
+                : "samsung_product_jsonld"
+              : "samsung_card_api",
+            product_type: isComputer ? "laptop" : "mobile",
+            model_sku: apiDevice.modelSku || simpleProduct?.sku || "",
+            tech_specs: fullSpecs?.tech_specs || {},
+            spec_sections: fullSpecs?.spec_sections || [],
+            variant_pricing: variants.map((v) => ({
+              color: v.color,
+              storage: v.storage,
+              ram: v.ram,
+              mrp: v.mrp,
+              selling_price: v.selling_price,
+              image: v.reference_image_url,
+            })),
+          },
+          main_image_url: mainImageUrl,
+          variants: variants as any,
+        } as any;
+      }
+
+      // Computers without ProductGroup / API — use simple Product JSON-LD
+      if (simpleProduct && isComputer) {
+        const price = simpleProduct.price || 0;
+        return {
+          brand_id: "",
+          brand_name: "Samsung",
+          model_name: cleanScrapedModelName(simpleProduct.modelName, "Samsung"),
+          slug: `samsung-${simpleProduct.modelName}`
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-"),
+          release_year: new Date().getFullYear(),
+          source_provider: "scraper_samsung",
+          specifications: {
+            processor: "—",
+            display: "—",
+            camera: "—",
+            battery: "—",
+            os: "Windows",
+            dimensions: "—",
+            weight: "—",
+            description: simpleProduct.description,
+            gallery_images: simpleProduct.image ? [simpleProduct.image] : [],
+            color_images: {},
+            mrp: price || undefined,
+            selling_price: price || undefined,
+            currency: "INR",
+            price_source: "samsung_product_jsonld",
+            product_type: "laptop",
+            model_sku: simpleProduct.sku || modelFromUrl || "",
+          },
+          main_image_url: simpleProduct.image || "",
+          variants: [
+            {
+              id: "",
+              master_device_id: "",
+              ram: "",
+              storage: "",
+              color: "Standard",
+              reference_image_url: simpleProduct.image || "",
+              mrp: price,
+              selling_price: price,
+            },
+          ] as any,
+        } as any;
+      }
+
+      return null;
     }
 
     const gallery = group.gallery.filter((u) => !isJunkBrandImage(u));
