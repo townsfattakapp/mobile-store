@@ -4,6 +4,8 @@ Last updated: 2026-08-10
 
 This file tracks **what is already shipped in code** vs **what still needs manual production setup** before notifications and related migrations are fully live.
 
+**Production storefront:** https://www.mahadevmobile.in/
+
 ---
 
 ## Done in code (this release)
@@ -62,32 +64,20 @@ Then in Admin Settings (on the owner’s phone browser): **Enable alerts on this
 
 ### D. Site / payments / storage (verify on Vercel)
 
-- [ ] `NEXT_PUBLIC_SITE_URL` = real production domain (no localhost; used in WhatsApp product links + emails)
+Production storefront (live): **https://www.mahadevmobile.in/**
+
+- [x] Custom domain live — smoke **21/21** on `www.mahadevmobile.in` (2026-08-10)
+- [ ] `NEXT_PUBLIC_SITE_URL=https://www.mahadevmobile.in` on **Vercel Production** (so WhatsApp product links & order emails never use localhost / `*.vercel.app`)
 - [ ] Supabase URL + anon + service role for the **prod** project
 - [ ] Razorpay live keys (or keep demo only if intentionally testing)
 - [ ] Cloudflare R2 env vars for images / store profile JSON
 
-### D2. Custom domain DNS (important — verified 2026-08-10)
-
-Live Next.js deploy that passes smoke:
-
-- https://mobile-store-umber-gamma.vercel.app  (21/21 smoke OK after this release)
-
-`mahadevmobiles.com` / `www.mahadevmobiles.com` currently respond from **Hostinger** (not the Vercel Next app). Most paths return 404 there.
-
-To finish production cutover:
-
-1. In Vercel project → Domains → add `mahadevmobiles.com` + `www`
-2. Point DNS (A/CNAME) from Hostinger to Vercel as shown in the dashboard
-3. Set `NEXT_PUBLIC_SITE_URL=https://mahadevmobiles.com` (or `https://www.…`) in Vercel Production
-4. Redeploy once, then run: `npm run smoke -- https://mahadevmobiles.com`
-
-Until DNS is moved, share/test the Vercel URL above.
+Note: older Hostinger hostnames like `mahadevmobiles.com` are unrelated — primary brand domain is **mahadevmobile.in**.
 
 ### E. Smoke after deploy
 
 ```bash
-npm run smoke -- https://YOUR_PRODUCTION_DOMAIN
+npm run smoke -- https://www.mahadevmobile.in
 ```
 
 Manual happy paths:

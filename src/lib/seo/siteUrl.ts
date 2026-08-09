@@ -8,5 +8,5 @@ export function getSiteUrl() {
   if (process.env.VERCEL_URL) {
     return `https://${process.env.VERCEL_URL.replace(/\/$/, "")}`;
   }
-  return "https://mobile-store-umber-gamma.vercel.app";
+  return "https://www.mahadevmobile.in";
 }
