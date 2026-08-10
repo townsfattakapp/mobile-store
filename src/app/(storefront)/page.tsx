@@ -16,9 +16,9 @@ import { getStorefrontProfile } from "@/lib/store/profile";
 import { brandLogoParts } from "@/lib/store/profile-shared";
 import { ProductPhoto } from "@/components/storefront/ProductPhoto";
 import {
-  SMARTPHONE_CATEGORY_SLUG,
-  excludeNonPhoneNameFilter,
-  getCategoryIdBySlug,
+  NON_PHONE_CATEGORY_SLUGS,
+  applyPhoneHubFilters,
+  getCategoryIdsBySlugs,
 } from "@/lib/storefront/productQueries";
 
 export const revalidate = 60;
@@ -63,10 +63,7 @@ const PRODUCT_SELECT =
 
 export default async function HomePage() {
   const supabase = await createClient();
-  const [newPhoneCatId, usedPhoneCatId] = await Promise.all([
-    getCategoryIdBySlug(supabase, SMARTPHONE_CATEGORY_SLUG.new),
-    getCategoryIdBySlug(supabase, SMARTPHONE_CATEGORY_SLUG.used),
-  ]);
+  const excludeCategoryIds = await getCategoryIdsBySlugs(supabase, NON_PHONE_CATEGORY_SLUGS);
 
   let launchesQ = supabase
     .from("products")
@@ -93,18 +90,9 @@ export default async function HomePage() {
     .order("selling_price", { ascending: false })
     .limit(1);
 
-  if (newPhoneCatId) {
-    launchesQ = launchesQ.eq("category_id", newPhoneCatId);
-    featuredQ = featuredQ.eq("category_id", newPhoneCatId);
-  } else {
-    launchesQ = excludeNonPhoneNameFilter(launchesQ);
-    featuredQ = excludeNonPhoneNameFilter(featuredQ);
-  }
-  if (usedPhoneCatId) {
-    usedQ = usedQ.eq("category_id", usedPhoneCatId);
-  } else {
-    usedQ = excludeNonPhoneNameFilter(usedQ);
-  }
+  launchesQ = applyPhoneHubFilters(launchesQ, excludeCategoryIds);
+  usedQ = applyPhoneHubFilters(usedQ, excludeCategoryIds);
+  featuredQ = applyPhoneHubFilters(featuredQ, excludeCategoryIds);
 
   const [launchesRes, usedRes, brandsRes, featuredRes, store] = await Promise.all([
     launchesQ,

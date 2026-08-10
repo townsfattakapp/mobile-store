@@ -31,11 +31,29 @@ export const PRODUCT_CARD_SELECT_INNER_BRAND = `
 
 export const PLP_PAGE_SIZE = 24;
 
-/** Hub pages must not spill tablets/laptops into “Mobiles”. */
+/** Preferred phone hubs (used when products are correctly tagged). */
 export const SMARTPHONE_CATEGORY_SLUG = {
   new: "smartphones-new",
   used: "smartphones-pre-owned",
 } as const;
+
+/** Categories that must never appear on /new-mobiles or /used-mobiles. */
+export const NON_PHONE_CATEGORY_SLUGS = [
+  "laptops-new",
+  "laptops-pre-owned",
+  "tablets-new",
+  "tablets-pre-owned",
+  "laptop-bags-stands",
+  "chargers-cables",
+  "power-banks",
+  "cases-covers-tempered-glass",
+  "audio-earbuds-headphones",
+  "smartwatches-bands",
+  "car-mounts-holders",
+  "storage-memory",
+  "mobile-spare-parts",
+  "computer-spare-parts",
+] as const;
 
 export async function getCategoryIdBySlug(
   supabase: { from: (t: string) => any },
@@ -49,9 +67,17 @@ export async function getCategoryIdBySlug(
   return data?.id || null;
 }
 
+export async function getCategoryIdsBySlugs(
+  supabase: { from: (t: string) => any },
+  slugs: readonly string[]
+): Promise<string[]> {
+  if (!slugs.length) return [];
+  const { data } = await supabase.from("categories").select("id, slug").in("slug", [...slugs]);
+  return (data || []).map((row: { id: string }) => row.id).filter(Boolean);
+}
+
 /**
- * Drop obvious non-phone devices when category_id is missing / unset.
- * Used as a safety net alongside smartphones-* category filters.
+ * Drop obvious non-phone devices by title (safety net for mis-tagged rows).
  */
 export function excludeNonPhoneNameFilter(query: any): any {
   return query
@@ -62,6 +88,20 @@ export function excludeNonPhoneNameFilter(query: any): any {
     .not("name", "ilike", "%chromebook%")
     .not("name", "ilike", "%ipad%")
     .not("name", "ilike", "% tablet%")
-    .not("name", "ilike", "tablet %")
-    .not("name", "ilike", "%tab %");
+    .not("name", "ilike", "tablet %");
+}
+
+/**
+ * Keep phone PLPs usable even when many phones lack smartphones-* tags:
+ * exclude laptop/tablet/accessory category ids + obvious non-phone names.
+ */
+export function applyPhoneHubFilters(query: any, excludeCategoryIds: string[]): any {
+  let next = excludeNonPhoneNameFilter(query);
+  if (excludeCategoryIds.length) {
+    // Keep null category_id rows; only drop known non-phone categories.
+    next = next.or(
+      `category_id.is.null,category_id.not.in.(${excludeCategoryIds.join(",")})`
+    );
+  }
+  return next;
 }

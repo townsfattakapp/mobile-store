@@ -3,7 +3,13 @@ import Link from "next/link";
 import { createClient } from "@/utils/supabase/server";
 import { ProductCard } from "@/components/storefront/ProductCard";
 import { PlpToolbar } from "@/components/storefront/PlpToolbar";
-import { PLP_PAGE_SIZE, PRODUCT_CARD_SELECT, SMARTPHONE_CATEGORY_SLUG, excludeNonPhoneNameFilter, getCategoryIdBySlug } from "@/lib/storefront/productQueries";
+import {
+  PLP_PAGE_SIZE,
+  PRODUCT_CARD_SELECT,
+  NON_PHONE_CATEGORY_SLUGS,
+  applyPhoneHubFilters,
+  getCategoryIdsBySlugs,
+} from "@/lib/storefront/productQueries";
 
 export const revalidate = 60;
 
@@ -18,10 +24,7 @@ export default async function UsedMobilesPage({
   const to = from + PLP_PAGE_SIZE - 1;
 
   const supabase = await createClient();
-  const phoneCategoryId = await getCategoryIdBySlug(
-    supabase,
-    SMARTPHONE_CATEGORY_SLUG.used
-  );
+  const excludeCategoryIds = await getCategoryIdsBySlugs(supabase, NON_PHONE_CATEGORY_SLUGS);
 
   let query = supabase
     .from("products")
@@ -29,11 +32,7 @@ export default async function UsedMobilesPage({
     .eq("type", "used_mobile")
     .eq("status", "active");
 
-  if (phoneCategoryId) {
-    query = query.eq("category_id", phoneCategoryId);
-  } else {
-    query = excludeNonPhoneNameFilter(query);
-  }
+  query = applyPhoneHubFilters(query, excludeCategoryIds);
   if (sortFilter === "price_asc") {
     query = query.order("selling_price", { ascending: true });
   } else if (sortFilter === "price_desc") {

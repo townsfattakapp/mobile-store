@@ -6,9 +6,9 @@ import { PlpToolbar } from "@/components/storefront/PlpToolbar";
 import {
   PLP_PAGE_SIZE,
   PRODUCT_CARD_SELECT_INNER_BRAND,
-  SMARTPHONE_CATEGORY_SLUG,
-  excludeNonPhoneNameFilter,
-  getCategoryIdBySlug,
+  NON_PHONE_CATEGORY_SLUGS,
+  applyPhoneHubFilters,
+  getCategoryIdsBySlugs,
 } from "@/lib/storefront/productQueries";
 
 export const revalidate = 60;
@@ -28,10 +28,7 @@ export default async function NewMobilesPage({
   const to = from + PLP_PAGE_SIZE - 1;
 
   const supabase = await createClient();
-  const phoneCategoryId = await getCategoryIdBySlug(
-    supabase,
-    SMARTPHONE_CATEGORY_SLUG.new
-  );
+  const excludeCategoryIds = await getCategoryIdsBySlugs(supabase, NON_PHONE_CATEGORY_SLUGS);
 
   let productQuery = supabase
     .from("products")
@@ -39,11 +36,7 @@ export default async function NewMobilesPage({
     .eq("type", "new_mobile")
     .eq("status", "active");
 
-  if (phoneCategoryId) {
-    productQuery = productQuery.eq("category_id", phoneCategoryId);
-  } else {
-    productQuery = excludeNonPhoneNameFilter(productQuery);
-  }
+  productQuery = applyPhoneHubFilters(productQuery, excludeCategoryIds);
 
   if (brandFilter) {
     productQuery = productQuery.ilike("brands.name", `%${brandFilter}%`);
@@ -71,11 +64,7 @@ export default async function NewMobilesPage({
     .eq("type", "new_mobile")
     .eq("status", "active");
 
-  if (phoneCategoryId) {
-    brandsQuery = brandsQuery.eq("category_id", phoneCategoryId);
-  } else {
-    brandsQuery = excludeNonPhoneNameFilter(brandsQuery);
-  }
+  brandsQuery = applyPhoneHubFilters(brandsQuery, excludeCategoryIds);
 
   const [{ data: brandRows }, { data: products, count }] = await Promise.all([
     brandsQuery,
