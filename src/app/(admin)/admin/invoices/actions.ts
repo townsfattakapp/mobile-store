@@ -44,6 +44,17 @@ export async function getStoreSettings(): Promise<StoreSettings> {
       tax_inclusive_pricing: data.tax_inclusive_pricing ?? true,
       gst_registered: data.gst_registered ?? false,
       composition_scheme: data.composition_scheme ?? false,
+      warranty_content:
+        String(data.warranty_content || "").trim() || DEFAULT_STORE_SETTINGS.warranty_content,
+      refund_policy_content:
+        String(data.refund_policy_content || "").trim() ||
+        DEFAULT_STORE_SETTINGS.refund_policy_content,
+      shipping_policy_content:
+        String(data.shipping_policy_content || "").trim() ||
+        DEFAULT_STORE_SETTINGS.shipping_policy_content,
+      contact_page_content:
+        String(data.contact_page_content || "").trim() ||
+        DEFAULT_STORE_SETTINGS.contact_page_content,
     };
   } catch {
     return { ...DEFAULT_STORE_SETTINGS };
@@ -173,14 +184,21 @@ export async function saveStoreSettings(payload: Partial<StoreSettings>) {
     hero_subcopy: merged.hero_subcopy,
   };
 
+  const cmsRow = {
+    warranty_content: merged.warranty_content ?? null,
+    refund_policy_content: merged.refund_policy_content ?? null,
+    shipping_policy_content: merged.shipping_policy_content ?? null,
+    contact_page_content: merged.contact_page_content ?? null,
+  };
+
   // 1) Publish storefront profile to R2 (primary source for website)
   const published = await writeStorefrontProfileToR2(profileFromSettings(merged));
   if (!published.ok) {
     return { error: published.error };
   }
 
-  // 2) Persist invoice/legal fields (+ branding columns when migration applied)
-  const fullRow = { ...coreRow, ...brandingRow };
+  // 2) Persist invoice/legal fields (+ branding / CMS columns when migration applied)
+  const fullRow = { ...coreRow, ...brandingRow, ...cmsRow };
 
   if (current.id) {
     let { error } = await supabase.from("store_settings").update(fullRow).eq("id", current.id);
@@ -188,7 +206,13 @@ export async function saveStoreSettings(payload: Partial<StoreSettings>) {
       const { whatsapp_number: _wa, ...withoutWa } = brandingRow as any;
       ({ error } = await supabase
         .from("store_settings")
-        .update({ ...coreRow, ...withoutWa })
+        .update({ ...coreRow, ...withoutWa, ...cmsRow })
+        .eq("id", current.id));
+    }
+    if (error && /warranty_content|refund_policy_content|shipping_policy_content|contact_page_content/i.test(error.message)) {
+      ({ error } = await supabase
+        .from("store_settings")
+        .update({ ...coreRow, ...brandingRow })
         .eq("id", current.id));
     }
     if (error && /column|brand_name|schema cache/i.test(error.message)) {
@@ -200,7 +224,12 @@ export async function saveStoreSettings(payload: Partial<StoreSettings>) {
     let { error } = await supabase.from("store_settings").insert(fullRow);
     if (error && /whatsapp_number/i.test(error.message)) {
       const { whatsapp_number: _wa, ...withoutWa } = brandingRow as any;
-      ({ error } = await supabase.from("store_settings").insert({ ...coreRow, ...withoutWa }));
+      ({ error } = await supabase
+        .from("store_settings")
+        .insert({ ...coreRow, ...withoutWa, ...cmsRow }));
+    }
+    if (error && /warranty_content|refund_policy_content|shipping_policy_content|contact_page_content/i.test(error.message)) {
+      ({ error } = await supabase.from("store_settings").insert({ ...coreRow, ...brandingRow }));
     }
     if (error && /column|brand_name|schema cache/i.test(error.message)) {
       ({ error } = await supabase.from("store_settings").insert(coreRow));
@@ -210,6 +239,10 @@ export async function saveStoreSettings(payload: Partial<StoreSettings>) {
 
   revalidatePath("/");
   revalidatePath("/admin/settings");
+  revalidatePath("/warranty");
+  revalidatePath("/refund-policy");
+  revalidatePath("/shipping-policy");
+  revalidatePath("/contact");
   return { success: true };
 }
 

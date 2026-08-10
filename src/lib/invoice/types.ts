@@ -1,3 +1,10 @@
+import {
+  DEFAULT_CONTACT_PAGE_CONTENT,
+  DEFAULT_REFUND_POLICY_CONTENT,
+  DEFAULT_SHIPPING_POLICY_CONTENT,
+  DEFAULT_WARRANTY_CONTENT,
+} from "@/lib/store/cmsDefaults";
+
 export type InvoiceType = "tax_invoice" | "bill_of_supply" | "retail_invoice";
 export type InvoiceStatus = "issued" | "cancelled";
 export type SupplyType = "intra" | "inter" | "na";
@@ -52,6 +59,11 @@ export type StoreSettings = {
   hero_eyebrow?: string | null;
   hero_headline?: string | null;
   hero_subcopy?: string | null;
+  /** Markdown bodies for public CMS pages (admin Policies tab) */
+  warranty_content?: string | null;
+  refund_policy_content?: string | null;
+  shipping_policy_content?: string | null;
+  contact_page_content?: string | null;
 };
 
 export type InvoiceLineItem = {
@@ -192,6 +204,10 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   hero_headline: "Upgrade what you carry every day.",
   hero_subcopy:
     "New launches and quality-checked pre-owned phones — priced clearly, chosen carefully for Tiroda.",
+  warranty_content: DEFAULT_WARRANTY_CONTENT,
+  refund_policy_content: DEFAULT_REFUND_POLICY_CONTENT,
+  shipping_policy_content: DEFAULT_SHIPPING_POLICY_CONTENT,
+  contact_page_content: DEFAULT_CONTACT_PAGE_CONTENT,
 };
 
 export function normalizeAddress(snapshot: any) {

@@ -28,6 +28,11 @@ const TABS = [
     description: "Browser title and meta description for Google and link previews.",
   },
   {
+    id: "policies",
+    label: "Policies",
+    description: "Edit Warranty, Refund, Shipping, and Contact page content shown on the website.",
+  },
+  {
     id: "notifications",
     label: "Notifications",
     description: "Alerts when customers place or pay for website orders.",
@@ -46,8 +51,45 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
+const POLICY_PAGES = [
+  {
+    id: "warranty",
+    label: "Warranty",
+    field: "warranty_content" as const,
+    previewHref: "/warranty",
+    hint: "Shown at /warranty — use # headings, - lists, **bold**, and [links](/path).",
+  },
+  {
+    id: "refund",
+    label: "Refund / Return",
+    field: "refund_policy_content" as const,
+    previewHref: "/refund-policy",
+    hint: "Shown at /refund-policy.",
+  },
+  {
+    id: "shipping",
+    label: "Shipping",
+    field: "shipping_policy_content" as const,
+    previewHref: "/shipping-policy",
+    hint: "Shown at /shipping-policy.",
+  },
+  {
+    id: "contact-page",
+    label: "Contact page",
+    field: "contact_page_content" as const,
+    previewHref: "/contact",
+    hint: "Intro text on /contact. Phone, address, and hours still come from the Contact tab.",
+  },
+] as const;
+
+type PolicyPageId = (typeof POLICY_PAGES)[number]["id"];
+
 function isTabId(value: string | null): value is TabId {
   return TABS.some((tab) => tab.id === value);
+}
+
+function isPolicyPageId(value: string | null): value is PolicyPageId {
+  return POLICY_PAGES.some((page) => page.id === value);
 }
 
 function AdminSettingsInner() {
@@ -55,6 +97,8 @@ function AdminSettingsInner() {
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
   const activeTab: TabId = isTabId(tabParam) ? tabParam : "website";
+  const policyParam = searchParams.get("page");
+  const activePolicy: PolicyPageId = isPolicyPageId(policyParam) ? policyParam : "warranty";
 
   const [form, setForm] = useState<StoreSettings>({ ...DEFAULT_STORE_SETTINGS });
   const [loading, setLoading] = useState(true);
@@ -97,6 +141,14 @@ function AdminSettingsInner() {
   const setTab = (id: TabId) => {
     const params = new URLSearchParams(searchParams.toString());
     params.set("tab", id);
+    if (id !== "policies") params.delete("page");
+    router.replace(`/admin/settings?${params.toString()}`, { scroll: false });
+  };
+
+  const setPolicyPage = (id: PolicyPageId) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", "policies");
+    params.set("page", id);
     router.replace(`/admin/settings?${params.toString()}`, { scroll: false });
   };
 
@@ -354,6 +406,57 @@ function AdminSettingsInner() {
                   />
                 </div>
               </div>
+            </section>
+          )}
+
+          {activeTab === "policies" && (
+            <section className="space-y-4" role="tabpanel">
+              <div className="flex flex-wrap gap-2">
+                {POLICY_PAGES.map((page) => {
+                  const selected = page.id === activePolicy;
+                  return (
+                    <button
+                      key={page.id}
+                      type="button"
+                      onClick={() => setPolicyPage(page.id)}
+                      className={`rounded-lg px-3 py-1.5 text-sm font-medium border transition-colors ${
+                        selected
+                          ? "bg-[#1d1d1f] text-white border-[#1d1d1f]"
+                          : "bg-white text-[#424245] border-neutral-200 hover:border-neutral-400"
+                      }`}
+                    >
+                      {page.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {POLICY_PAGES.filter((page) => page.id === activePolicy).map((page) => (
+                <div key={page.id} className="space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <p className="text-xs text-[#6e6e73]">{page.hint}</p>
+                    <Link
+                      href={page.previewHref}
+                      target="_blank"
+                      className="text-xs font-semibold text-[#3b2f7c] hover:underline shrink-0"
+                    >
+                      Preview live page →
+                    </Link>
+                  </div>
+                  <textarea
+                    value={(form[page.field] as string) || ""}
+                    onChange={(e) => set(page.field, e.target.value)}
+                    rows={18}
+                    spellCheck
+                    className="w-full px-3 py-3 border border-neutral-300 rounded-md text-[#1d1d1f] bg-white focus:ring-2 focus:ring-black outline-none resize-y font-mono text-xs leading-relaxed"
+                  />
+                  <p className="text-[11px] text-[#6e6e73]">
+                    Tip: blank lines start new paragraphs. Headings use{" "}
+                    <code className="bg-neutral-100 px-1 rounded"># Title</code> or{" "}
+                    <code className="bg-neutral-100 px-1 rounded">## Section</code>.
+                  </p>
+                </div>
+              ))}
             </section>
           )}
 
