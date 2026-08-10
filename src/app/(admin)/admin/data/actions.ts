@@ -72,6 +72,13 @@ export async function softDeleteOrder(orderId: string, reason = "Archived by adm
     return { error: error.message };
   }
 
+  try {
+    const { voidPromoRedemptionForOrder } = await import("@/lib/promo/server");
+    await voidPromoRedemptionForOrder(orderId);
+  } catch {
+    // non-fatal
+  }
+
   // Cancel issued invoices so a new invoice can be issued later if needed, then archive
   await auth.supabase
     .from("invoices")
@@ -276,6 +283,12 @@ export async function softDeleteWalkInCustomer(
 
   if (ids.length) {
     await auth.supabase.from("orders").update(patch).in("id", ids);
+    try {
+      const { voidPromoRedemptionsForOrders } = await import("@/lib/promo/server");
+      await voidPromoRedemptionsForOrders(ids);
+    } catch {
+      // non-fatal
+    }
     await auth.supabase
       .from("invoices")
       .update({
@@ -340,6 +353,13 @@ export async function archiveAllOrdersAndInvoices(reason = "Bulk test data clear
       .in("id", chunk);
     if (error) return { error: error.message };
     ordersArchived += count ?? chunk.length;
+  }
+
+  try {
+    const { voidPromoRedemptionsForOrders } = await import("@/lib/promo/server");
+    await voidPromoRedemptionsForOrders(orderIds);
+  } catch {
+    // non-fatal
   }
 
   await auth.supabase

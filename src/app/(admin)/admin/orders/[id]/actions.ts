@@ -84,6 +84,12 @@ export async function updateOrderStatusAction(orderId: string, status: string) {
     user.id
   );
 
+  // Free promo usage when an order is cancelled
+  if (status === "cancelled") {
+    const { voidPromoRedemptionForOrder } = await import("@/lib/promo/server");
+    await voidPromoRedemptionForOrder(orderId);
+  }
+
   revalidatePath(`/admin/orders/${orderId}`);
   revalidatePath("/admin/orders");
   return { success: true };

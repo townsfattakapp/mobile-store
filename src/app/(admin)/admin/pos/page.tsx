@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { searchPosProducts, createWalkinOrderAndInvoice } from "./actions";
+import { previewPromoForCart } from "@/lib/promo/server";
 
 type DiscountMode = "none" | "percent" | "flat";
 
@@ -68,6 +69,13 @@ export default function POSPage() {
   const [billDiscountMode, setBillDiscountMode] = useState<DiscountMode>("none");
   const [billDiscountValue, setBillDiscountValue] = useState(0);
   const [discountNote, setDiscountNote] = useState("");
+  const [promoInput, setPromoInput] = useState("");
+  const [promoApplied, setPromoApplied] = useState<{
+    code: string;
+    discount: number;
+    message: string;
+  } | null>(null);
+  const [promoBusy, setPromoBusy] = useState(false);
 
   const [isProcessing, setIsProcessing] = useState(false);
 
@@ -84,6 +92,28 @@ export default function POSPage() {
     }, 300);
     return () => clearTimeout(timer);
   }, [searchQuery]);
+
+  // Cart / line price changes invalidate a previously previewed promo amount
+  const cartKey = useMemo(
+    () =>
+      cart
+        .map(
+          (i) =>
+            `${i.product_id}:${i.variant_id}:${i.quantity}:${i.list_price}:${i.discount_mode}:${i.discount_value}`
+        )
+        .join("|"),
+    [cart]
+  );
+
+  useEffect(() => {
+    setPromoApplied((prev) => {
+      if (!prev) return prev;
+      setPromoInput(prev.code);
+      setBillDiscountMode("none");
+      setBillDiscountValue(0);
+      return null;
+    });
+  }, [cartKey]);
 
   const totals = useMemo(() => {
     const subtotal = round2(cart.reduce((s, i) => s + i.list_price * i.quantity, 0));
@@ -175,6 +205,50 @@ export default function POSPage() {
     setCart((prev) => prev.filter((_, i) => i !== index));
   };
 
+  const applyPromo = async () => {
+    if (!promoInput.trim()) return;
+    if (cart.length === 0) return alert("Add products before applying a promo.");
+
+    setPromoBusy(true);
+    const res = await previewPromoForCart({
+      code: promoInput.trim(),
+      lines: cart.map((item) => ({
+        productId: item.product_id,
+        variantId: item.variant_id,
+        name: item.name,
+        quantity: item.quantity,
+        // Promo applies on net-after-line-discount (matches server POS total)
+        price: round2(lineNet(item) / Math.max(1, item.quantity)),
+      })),
+      phone: customerPhone.trim() || null,
+    });
+    setPromoBusy(false);
+
+    if (!res.ok) {
+      setPromoApplied(null);
+      alert(res.error);
+      return;
+    }
+
+    setPromoApplied({
+      code: res.promo.code,
+      discount: res.discountAmount,
+      message: res.message,
+    });
+    setBillDiscountMode("flat");
+    setBillDiscountValue(res.discountAmount);
+    if (!discountNote.trim()) {
+      setDiscountNote(`Promo ${res.promo.code}`);
+    }
+  };
+
+  const clearPromo = () => {
+    setPromoApplied(null);
+    setPromoInput("");
+    setBillDiscountMode("none");
+    setBillDiscountValue(0);
+  };
+
   const handleCheckout = async () => {
     if (cart.length === 0) return alert("Cart is empty");
 
@@ -195,6 +269,7 @@ export default function POSPage() {
       paymentMethod,
       bill_discount: totals.billDiscount,
       discount_note: discountNote.trim(),
+      promo_code: promoApplied?.code || undefined,
     });
 
     if (res.error) {
@@ -410,22 +485,64 @@ export default function POSPage() {
               </div>
             )}
 
-            {/* Bill discount */}
+            {/* Promo code */}
+            <div className="rounded-lg border bg-gray-50 p-3 space-y-2">
+              <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Promo code
+              </span>
+              {promoApplied ? (
+                <div className="flex items-center justify-between gap-2 text-sm">
+                  <div>
+                    <span className="font-semibold text-emerald-800">{promoApplied.code}</span>
+                    <span className="text-gray-600"> · {promoApplied.message}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={clearPromo}
+                    className="text-xs text-red-600 hover:underline"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={promoInput}
+                    onChange={(e) => setPromoInput(e.target.value.toUpperCase())}
+                    placeholder="e.g. SAVE100"
+                    className="flex-1 h-9 px-3 text-sm border rounded-md bg-white uppercase"
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="h-9 px-3 text-xs"
+                    disabled={promoBusy || !promoInput.trim()}
+                    onClick={applyPromo}
+                  >
+                    {promoBusy ? "…" : "Apply"}
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {/* Bill discount (manual; disabled while promo is applied) */}
             <div className="rounded-lg border bg-gray-50 p-3 space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Bill discount
+                  Bill discount{promoApplied ? " (via promo)" : ""}
                 </span>
                 <div className="flex rounded-md border overflow-hidden text-xs bg-white">
                   {(["none", "percent", "flat"] as DiscountMode[]).map((mode) => (
                     <button
                       key={mode}
                       type="button"
+                      disabled={!!promoApplied}
                       onClick={() => {
                         setBillDiscountMode(mode);
                         if (mode === "none") setBillDiscountValue(0);
                       }}
-                      className={`px-2.5 py-1 ${
+                      className={`px-2.5 py-1 disabled:opacity-40 ${
                         billDiscountMode === mode
                           ? "bg-[#1d1d1f] text-white"
                           : "text-gray-600 hover:bg-gray-100"
@@ -443,8 +560,9 @@ export default function POSPage() {
                     min={0}
                     max={billDiscountMode === "percent" ? 100 : undefined}
                     value={billDiscountValue || ""}
+                    disabled={!!promoApplied}
                     onChange={(e) => setBillDiscountValue(Number(e.target.value) || 0)}
-                    className="w-full h-9 pl-7 pr-3 text-sm border rounded-md bg-white"
+                    className="w-full h-9 pl-7 pr-3 text-sm border rounded-md bg-white disabled:opacity-60"
                     placeholder={billDiscountMode === "percent" ? "e.g. 5" : "e.g. 500"}
                   />
                   <span className="absolute left-2.5 top-2.5 text-gray-400">

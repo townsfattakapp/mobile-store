@@ -3,8 +3,18 @@
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { notifyOwnerOfOrder } from "@/lib/notify/notifyOwner";
+import { roundMoney } from "@/lib/promo/promo";
+import {
+  enrichCartLinesForPromo,
+  recordPromoRedemption,
+  resolvePromoForCheckout,
+} from "@/lib/promo/server";
 
-export async function placeOrder(formData: any, cartItems: any[], subtotal: number) {
+export async function placeOrder(
+  formData: any,
+  cartItems: any[],
+  subtotalFromClient: number
+) {
   const supabase = await createClient();
 
   try {
@@ -35,7 +45,6 @@ export async function placeOrder(formData: any, cartItems: any[], subtotal: numb
       }
     }
 
-    // Service role: create/link profile + insert order (avoids profiles RLS + FK issues)
     const admin = createAdminClient();
 
     const {
@@ -88,14 +97,65 @@ export async function placeOrder(formData: any, cartItems: any[], subtotal: numb
       }
     }
 
+    const phone = String(formData.get("phone") || "").trim();
+    const email = String(formData.get("email") || "").trim();
+    const promoCodeRaw = String(formData.get("promoCode") || "").trim();
+
+    const enriched = await enrichCartLinesForPromo(
+      cartItems.map((item) => ({
+        productId: item.productId,
+        variantId: item.variantId || null,
+        name: String(item.name || "Item"),
+        quantity: Number(item.quantity) || 0,
+        price: Number(item.price) || 0,
+      }))
+    );
+
+    const serverSubtotal = roundMoney(
+      enriched.reduce((s, l) => s + l.price * l.quantity, 0)
+    );
+    // Prefer server math; tolerate 1 ₹ client drift
+    const subtotal =
+      Math.abs(serverSubtotal - Number(subtotalFromClient || 0)) < 1
+        ? serverSubtotal
+        : serverSubtotal;
+
+    let discount = 0;
+    let promoId: string | null = null;
+    let promoCodeApplied: string | null = null;
+    let promoNote = "";
+
+    if (promoCodeRaw) {
+      const promoRes = await resolvePromoForCheckout({
+        code: promoCodeRaw,
+        lines: enriched,
+        customer: { userId, phone, email: email || user?.email || null },
+      });
+      if (!promoRes.ok) {
+        return { error: promoRes.error };
+      }
+      if (!("skipped" in promoRes)) {
+        discount = promoRes.discountAmount;
+        promoId = promoRes.promo.id;
+        promoCodeApplied = promoRes.promo.code;
+        promoNote = `Promo ${promoRes.promo.code}: −₹${discount}`;
+      }
+    }
+
+    const shipping = subtotal > 50000 ? 0 : 500;
+    const grandTotal = roundMoney(Math.max(0, subtotal - discount + shipping));
+    const paymentMethod = formData.get("paymentMethod") || "cod";
+
+    const notesParts = [
+      paymentMethod === "online" ? "Awaiting online payment" : null,
+      promoNote || null,
+    ].filter(Boolean);
+
     const orderNumber = `ORD-${new Date().getFullYear()}-${Math.floor(Math.random() * 1000000)
       .toString()
       .padStart(6, "0")}`;
 
-    const shipping = subtotal > 50000 ? 0 : 500;
-    const paymentMethod = formData.get("paymentMethod") || "cod";
-
-    const orderPayload = {
+    const orderPayload: Record<string, unknown> = {
       order_number: orderNumber,
       user_id: userId,
       address_snapshot: {
@@ -108,23 +168,49 @@ export async function placeOrder(formData: any, cartItems: any[], subtotal: numb
         pin_code: formData.get("pinCode"),
       },
       subtotal,
-      discount: 0,
+      discount,
       tax_total: 0,
       shipping_charge: shipping,
-      grand_total: subtotal + shipping,
+      grand_total: grandTotal,
       payment_method: paymentMethod,
       payment_status: "pending",
       status: "pending",
-      notes: paymentMethod === "online" ? "Awaiting online payment" : null,
+      notes: notesParts.length ? notesParts.join(" · ") : null,
     };
 
-    const { data: order, error: orderErr } = await admin
+    if (promoId) orderPayload.promo_code_id = promoId;
+
+    let { data: order, error: orderErr } = await admin
       .from("orders")
       .insert(orderPayload)
       .select("id, order_number")
       .single();
 
-    if (orderErr) throw new Error("Failed to create order: " + orderErr.message);
+    // Migration not applied: retry without promo_code_id
+    if (orderErr && /promo_code_id|column|schema cache/i.test(orderErr.message) && promoId) {
+      delete orderPayload.promo_code_id;
+      ({ data: order, error: orderErr } = await admin
+        .from("orders")
+        .insert(orderPayload)
+        .select("id, order_number")
+        .single());
+    }
+
+    if (orderErr || !order) {
+      throw new Error("Failed to create order: " + (orderErr?.message || "unknown"));
+    }
+
+    if (promoId && promoCodeApplied && discount > 0) {
+      await recordPromoRedemption({
+        promoId,
+        orderId: order.id,
+        userId,
+        phone,
+        email: email || user?.email || null,
+        code: promoCodeApplied,
+        discountAmount: discount,
+      });
+    }
 
     for (const item of cartItems) {
       let taxRate = 18;
@@ -191,7 +277,6 @@ export async function placeOrder(formData: any, cartItems: any[], subtotal: numb
       }
     }
 
-    // Owner alerts — errors are swallowed inside notifyOwnerOfOrder
     await notifyOwnerOfOrder({
       event: "order_created",
       orderId: order.id,
@@ -199,7 +284,7 @@ export async function placeOrder(formData: any, cartItems: any[], subtotal: numb
       paymentMethod: String(paymentMethod),
       paymentStatus: "pending",
       status: "pending",
-      grandTotal: orderPayload.grand_total,
+      grandTotal,
       shippingCharge: shipping,
       subtotal,
       customer: {
@@ -224,7 +309,9 @@ export async function placeOrder(formData: any, cartItems: any[], subtotal: numb
       orderNumber: order.order_number,
       orderId: order.id,
       paymentMethod: String(paymentMethod),
-      grandTotal: orderPayload.grand_total,
+      grandTotal,
+      discount,
+      promoCode: promoCodeApplied,
     };
   } catch (err: any) {
     console.error("Checkout transaction error:", err);

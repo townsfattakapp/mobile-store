@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useCartStore } from "@/store/useCartStore";
 import { useRouter } from "next/navigation";
 import { placeOrder } from "./actions";
-import { Lock, CreditCard, Banknote, ShieldCheck } from "lucide-react";
+import { previewPromoForCart } from "@/lib/promo/server";
+import { Lock, CreditCard, Banknote, ShieldCheck, Tag } from "lucide-react";
 import Link from "next/link";
 
 declare global {
@@ -31,6 +32,16 @@ export default function CheckoutPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<"online" | "cod">("online");
+  const [promoInput, setPromoInput] = useState("");
+  const [promoApplied, setPromoApplied] = useState<{
+    code: string;
+    discount: number;
+    message: string;
+  } | null>(null);
+  const [promoBusy, setPromoBusy] = useState(false);
+  const [promoError, setPromoError] = useState<string | null>(null);
+  const [phonePreview, setPhonePreview] = useState("");
+  const [emailPreview, setEmailPreview] = useState("");
   const router = useRouter();
 
   useEffect(() => {
@@ -44,6 +55,28 @@ export default function CheckoutPage() {
     document.documentElement.scrollTop = 0;
     document.body.scrollTop = 0;
   }, [mounted]);
+
+  const subtotal = useMemo(() => (mounted ? getSubtotal() : 0), [mounted, items, getSubtotal]);
+  const discount = promoApplied?.discount || 0;
+  const shipping = subtotal > 50000 ? 0 : 500;
+  const grandTotal = Math.max(0, subtotal - discount + shipping);
+
+  const cartKey = useMemo(
+    () =>
+      items
+        .map((i) => `${i.productId}:${i.variantId}:${i.quantity}:${i.price}`)
+        .join("|"),
+    [items]
+  );
+
+  useEffect(() => {
+    setPromoApplied((prev) => {
+      if (!prev) return prev;
+      setPromoInput(prev.code);
+      setPromoError(null);
+      return null;
+    });
+  }, [cartKey]);
 
   if (!mounted) return null;
 
@@ -61,13 +94,44 @@ export default function CheckoutPage() {
     );
   }
 
-  const subtotal = getSubtotal();
-  const shipping = subtotal > 50000 ? 0 : 500;
-  const grandTotal = subtotal + shipping;
-
   const finishSuccess = (orderNumber: string) => {
     clearCart();
     router.push(`/checkout/success?order_number=${orderNumber}`);
+  };
+
+  const applyPromo = async () => {
+    setPromoBusy(true);
+    setPromoError(null);
+    const res = await previewPromoForCart({
+      code: promoInput,
+      lines: items.map((item) => ({
+        productId: item.productId,
+        variantId: item.variantId,
+        name: item.name,
+        quantity: item.quantity,
+        price: item.price,
+      })),
+      phone: phonePreview,
+      email: emailPreview,
+    });
+    setPromoBusy(false);
+    if (!res.ok) {
+      setPromoApplied(null);
+      setPromoError(res.error);
+      return;
+    }
+    setPromoApplied({
+      code: res.promo.code,
+      discount: res.discountAmount,
+      message: res.message,
+    });
+    setPromoInput(res.promo.code);
+  };
+
+  const clearPromo = () => {
+    setPromoApplied(null);
+    setPromoError(null);
+    setPromoInput("");
   };
 
   const payOnline = async (dbOrderId: string, orderNumber: string) => {
@@ -154,6 +218,9 @@ export default function CheckoutPage() {
 
     const formData = new FormData(e.currentTarget);
     formData.set("paymentMethod", paymentMethod);
+    if (promoApplied?.code) {
+      formData.set("promoCode", promoApplied.code);
+    }
 
     try {
       const result = await placeOrder(formData, items, subtotal);
@@ -228,6 +295,14 @@ export default function CheckoutPage() {
                   <span>Subtotal</span>
                   <span>₹{subtotal.toLocaleString("en-IN")}</span>
                 </div>
+                {discount > 0 ? (
+                  <div>
+                    <span>Promo ({promoApplied?.code})</span>
+                    <span className="text-emerald-700">
+                      −₹{discount.toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                ) : null}
                 <div>
                   <span>Shipping</span>
                   <span>
@@ -241,6 +316,50 @@ export default function CheckoutPage() {
                     <small>Inclusive of taxes</small>
                   </div>
                 </div>
+              </div>
+
+              <div className="mt-4 border-t border-black/5 pt-4 space-y-2">
+                <label className="flex items-center gap-2 text-sm font-semibold text-[#1d1d1f]">
+                  <Tag size={14} aria-hidden /> Promo code
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={promoInput}
+                    onChange={(e) => setPromoInput(e.target.value.toUpperCase())}
+                    placeholder="SAVE100"
+                    disabled={!!promoApplied}
+                    className="flex-1 min-w-0 rounded-lg border border-neutral-300 px-3 py-2 text-sm font-mono uppercase tracking-wide"
+                  />
+                  {promoApplied ? (
+                    <button
+                      type="button"
+                      onClick={clearPromo}
+                      className="shrink-0 rounded-lg border border-neutral-300 px-3 py-2 text-sm font-medium"
+                    >
+                      Remove
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={applyPromo}
+                      disabled={promoBusy || !promoInput.trim()}
+                      className="shrink-0 rounded-lg bg-[#1d1d1f] text-white px-3 py-2 text-sm font-medium disabled:opacity-50"
+                    >
+                      {promoBusy ? "…" : "Apply"}
+                    </button>
+                  )}
+                </div>
+                {promoError ? (
+                  <p className="text-xs text-red-600">{promoError}</p>
+                ) : null}
+                {promoApplied ? (
+                  <p className="text-xs text-emerald-700">{promoApplied.message}</p>
+                ) : (
+                  <p className="text-[11px] text-[#6e6e73]">
+                    Fill phone/email below first if the offer is limited per customer.
+                  </p>
+                )}
               </div>
 
               <button
@@ -281,12 +400,28 @@ export default function CheckoutPage() {
 
                 <label className="ms-checkout-field">
                   <span>Email</span>
-                  <input required name="email" type="email" autoComplete="email" inputMode="email" placeholder="you@example.com" />
+                  <input
+                    required
+                    name="email"
+                    type="email"
+                    autoComplete="email"
+                    inputMode="email"
+                    placeholder="you@example.com"
+                    onChange={(e) => setEmailPreview(e.target.value)}
+                  />
                 </label>
 
                 <label className="ms-checkout-field">
                   <span>Phone</span>
-                  <input required name="phone" type="tel" autoComplete="tel" inputMode="tel" placeholder="98765 43210" />
+                  <input
+                    required
+                    name="phone"
+                    type="tel"
+                    autoComplete="tel"
+                    inputMode="tel"
+                    placeholder="98765 43210"
+                    onChange={(e) => setPhonePreview(e.target.value)}
+                  />
                 </label>
 
                 <label className="ms-checkout-field ms-checkout-field--full">

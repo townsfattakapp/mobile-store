@@ -2,6 +2,11 @@
 
 import { createClient } from "@/utils/supabase/server";
 import { generateInvoice } from "../invoices/actions";
+import {
+  enrichCartLinesForPromo,
+  recordPromoRedemption,
+  resolvePromoForCheckout,
+} from "@/lib/promo/server";
 
 export async function searchPosProducts(query: string) {
   const supabase = await createClient();
@@ -82,6 +87,8 @@ export async function createWalkinOrderAndInvoice(data: {
   paymentMethod: "cod" | "store_pickup" | "online";
   bill_discount?: number;
   discount_note?: string;
+  /** When set, server re-validates and sets bill discount to promo amount (no stack with manual bill %). */
+  promo_code?: string;
 }) {
   const supabase = await createClient();
 
@@ -115,9 +122,42 @@ export async function createWalkinOrderAndInvoice(data: {
   lineDiscountTotal = round2(lineDiscountTotal);
   afterLines = round2(afterLines);
 
-  const billDiscount = round2(
+  let billDiscount = round2(
     Math.min(afterLines, Math.max(0, Number(data.bill_discount) || 0))
   );
+  let promoId: string | null = null;
+  let promoCodeApplied: string | null = null;
+
+  const promoRaw = String(data.promo_code || "").trim();
+    if (promoRaw) {
+      const enriched = await enrichCartLinesForPromo(
+        data.cart.map((item) => ({
+          productId: item.product_id,
+          variantId: item.variant_id,
+          name: item.name,
+          quantity: item.quantity,
+          price: round2(item.line_total / Math.max(1, item.quantity)),
+        }))
+      );
+      const promoRes = await resolvePromoForCheckout({
+        code: promoRaw,
+        lines: enriched,
+        customer: {
+          userId: null,
+          phone: data.customerPhone || null,
+          email: null,
+        },
+      });
+      if (!promoRes.ok) {
+        return { error: promoRes.error };
+      }
+      if (!("skipped" in promoRes)) {
+        billDiscount = promoRes.discountAmount;
+        promoId = promoRes.promo.id;
+        promoCodeApplied = promoRes.promo.code;
+      }
+    }
+
   const grandTotal = round2(Math.max(0, afterLines - billDiscount));
 
   const { data: settings } = await supabase.from("store_settings").select("state").single();
@@ -137,33 +177,61 @@ export async function createWalkinOrderAndInvoice(data: {
 
   const discountParts = [
     lineDiscountTotal > 0 ? `Item discounts ₹${lineDiscountTotal}` : "",
-    billDiscount > 0 ? `Bill discount ₹${billDiscount}` : "",
+    promoCodeApplied
+      ? `Promo ${promoCodeApplied} ₹${billDiscount}`
+      : billDiscount > 0
+        ? `Bill discount ₹${billDiscount}`
+        : "",
     data.discount_note ? `Reason: ${data.discount_note}` : "",
   ].filter(Boolean);
 
   const notes = ["Walk-in POS Sale", ...discountParts].join(" · ");
 
-  const { data: order, error: orderError } = await supabase
+  const orderPayload: Record<string, unknown> = {
+    order_number: orderNumber,
+    address_snapshot: addressSnapshot,
+    subtotal,
+    discount: billDiscount,
+    tax_total: 0,
+    shipping_charge: 0,
+    grand_total: grandTotal,
+    payment_method: data.paymentMethod,
+    payment_status: "paid",
+    status: "delivered",
+    notes,
+  };
+  if (promoId) orderPayload.promo_code_id = promoId;
+
+  let { data: order, error: orderError } = await supabase
     .from("orders")
-    .insert([
-      {
-        order_number: orderNumber,
-        address_snapshot: addressSnapshot,
-        subtotal,
-        discount: billDiscount,
-        tax_total: 0,
-        shipping_charge: 0,
-        grand_total: grandTotal,
-        payment_method: data.paymentMethod,
-        payment_status: "paid",
-        status: "delivered",
-        notes,
-      },
-    ])
+    .insert([orderPayload])
     .select()
     .single();
 
-  if (orderError) return { error: "Order creation failed: " + orderError.message };
+  if (orderError && /promo_code_id|column|schema cache/i.test(orderError.message) && promoId) {
+    delete orderPayload.promo_code_id;
+    ({ data: order, error: orderError } = await supabase
+      .from("orders")
+      .insert([orderPayload])
+      .select()
+      .single());
+  }
+
+  if (orderError || !order) {
+    return { error: "Order creation failed: " + (orderError?.message || "unknown") };
+  }
+
+  if (promoId && promoCodeApplied && billDiscount > 0) {
+    await recordPromoRedemption({
+      promoId,
+      orderId: order.id,
+      userId: null,
+      phone: data.customerPhone || null,
+      email: null,
+      code: promoCodeApplied,
+      discountAmount: billDiscount,
+    });
+  }
 
   // Batch product tax + stock reads (was ~4 DB round-trips per cart line)
   const productIds = [...new Set(data.cart.map((i) => i.product_id).filter(Boolean))];
