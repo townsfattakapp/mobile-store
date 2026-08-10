@@ -51,50 +51,65 @@ export async function placeOrder(
       data: { user },
     } = await supabase.auth.getUser();
 
+    if (!user?.id) {
+      return {
+        error: "Please sign in to place an order.",
+        requireLogin: true,
+      };
+    }
+
     let userId: string | null = null;
-    if (user?.id) {
-      const { data: existing } = await admin
+    const { data: existing } = await admin
+      .from("profiles")
+      .select("id")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (existing?.id) {
+      userId = existing.id;
+    } else {
+      const fullName =
+        String(formData.get("fullName") || "").trim() ||
+        (user.user_metadata?.full_name as string | undefined) ||
+        null;
+      const phone =
+        String(formData.get("phone") || "").trim() || user.phone || null;
+
+      const { data: created, error: profileErr } = await admin
         .from("profiles")
+        .upsert(
+          {
+            id: user.id,
+            email:
+              user.email ||
+              String(formData.get("email") || "") ||
+              `user-${user.id.slice(0, 8)}@account.local`,
+            full_name: fullName,
+            phone_number: phone,
+            role: "customer",
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "id" }
+        )
         .select("id")
-        .eq("id", user.id)
-        .maybeSingle();
+        .single();
 
-      if (existing?.id) {
-        userId = existing.id;
-      } else {
-        const fullName =
-          String(formData.get("fullName") || "").trim() ||
-          (user.user_metadata?.full_name as string | undefined) ||
-          null;
-        const phone =
-          String(formData.get("phone") || "").trim() || user.phone || null;
-
-        const { data: created, error: profileErr } = await admin
-          .from("profiles")
-          .upsert(
-            {
-              id: user.id,
-              email:
-                user.email ||
-                String(formData.get("email") || "") ||
-                `user-${user.id.slice(0, 8)}@guest.local`,
-              full_name: fullName,
-              phone_number: phone,
-              role: "customer",
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: "id" }
-          )
-          .select("id")
-          .single();
-
-        if (profileErr) {
-          console.warn("Profile upsert failed; guest order:", profileErr.message);
-          userId = null;
-        } else {
-          userId = created.id;
-        }
+      if (profileErr || !created?.id) {
+        return {
+          error:
+            profileErr?.message ||
+            "Could not load your account. Please try signing in again.",
+          requireLogin: true,
+        };
       }
+      userId = created.id;
+    }
+
+    if (!userId) {
+      return {
+        error: "Please sign in to place an order.",
+        requireLogin: true,
+      };
     }
 
     const phone = String(formData.get("phone") || "").trim();

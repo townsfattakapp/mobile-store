@@ -10,14 +10,17 @@ export type AccountProfile = {
   role: string;
 };
 
-export async function requireCustomer() {
+export async function requireCustomer(nextPath = "/account") {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
+  const safeNext =
+    nextPath.startsWith("/") && !nextPath.startsWith("//") ? nextPath : "/account";
+
   if (!user) {
-    redirect("/login?next=/account");
+    redirect(`/login?next=${encodeURIComponent(safeNext)}`);
   }
 
   const admin = createAdminClient();

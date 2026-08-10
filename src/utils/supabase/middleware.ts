@@ -64,5 +64,17 @@ export async function updateSession(request: NextRequest) {
     }
   }
 
+  // Checkout requires a signed-in customer (no guest orders)
+  if (request.nextUrl.pathname.startsWith('/checkout')) {
+    if (!user) {
+      const url = request.nextUrl.clone()
+      url.pathname = '/login'
+      const next =
+        request.nextUrl.pathname + (request.nextUrl.search || '')
+      url.searchParams.set('next', next)
+      return NextResponse.redirect(url)
+    }
+  }
+
   return supabaseResponse
 }
