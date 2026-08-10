@@ -91,15 +91,27 @@ export default function AdminDashboard() {
         .select("id", { count: "exact", head: true })
         .is("deleted_at", null);
 
-      const { data: paidOrders } = await sb
+      let { data: paidOrders, error: paidErr } = await sb
         .from("orders")
         .select("grand_total, status")
         .neq("status", "cancelled")
-        .limit(500);
+        .neq("status", "refunded")
+        .is("deleted_at", null)
+        .limit(2000);
 
-      const totalSales = (paidOrders || [])
-        .filter((o) => o.status !== "refunded")
-        .reduce((s, o) => s + (Number(o.grand_total) || 0), 0);
+      if (paidErr && /deleted_at|column|schema cache/i.test(paidErr.message)) {
+        ({ data: paidOrders } = await sb
+          .from("orders")
+          .select("grand_total, status")
+          .neq("status", "cancelled")
+          .neq("status", "refunded")
+          .limit(2000));
+      }
+
+      const totalSales = (paidOrders || []).reduce(
+        (s, o) => s + (Number(o.grand_total) || 0),
+        0
+      );
 
       setStats({
         sales: totalSales || sales,

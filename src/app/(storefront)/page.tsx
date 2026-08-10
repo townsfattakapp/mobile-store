@@ -14,6 +14,12 @@ import {
 } from "@/lib/storefront/format";
 import { getStorefrontProfile } from "@/lib/store/profile";
 import { brandLogoParts } from "@/lib/store/profile-shared";
+import { ProductPhoto } from "@/components/storefront/ProductPhoto";
+import {
+  SMARTPHONE_CATEGORY_SLUG,
+  excludeNonPhoneNameFilter,
+  getCategoryIdBySlug,
+} from "@/lib/storefront/productQueries";
 
 export const revalidate = 60;
 
@@ -52,46 +58,65 @@ const COLLECTIONS = [
   },
 ];
 
+const PRODUCT_SELECT =
+  "id, name, slug, selling_price, mrp, main_image_url, type, brand:brands(name), variants:product_variants(name)";
+
 export default async function HomePage() {
   const supabase = await createClient();
+  const [newPhoneCatId, usedPhoneCatId] = await Promise.all([
+    getCategoryIdBySlug(supabase, SMARTPHONE_CATEGORY_SLUG.new),
+    getCategoryIdBySlug(supabase, SMARTPHONE_CATEGORY_SLUG.used),
+  ]);
 
-  const [launchesRes, usedRes, brandsRes, featuredRes] = await Promise.all([
-    supabase
-      .from("products")
-      .select(
-        "id, name, slug, selling_price, mrp, main_image_url, type, brand:brands(name), variants:product_variants(name)"
-      )
-      .eq("status", "active")
-      .eq("type", "new_mobile")
-      .gte("selling_price", 5000)
-      .order("created_at", { ascending: false })
-      .limit(8),
-    supabase
-      .from("products")
-      .select(
-        "id, name, slug, selling_price, mrp, main_image_url, type, brand:brands(name), variants:product_variants(name)"
-      )
-      .eq("status", "active")
-      .eq("type", "used_mobile")
-      .order("created_at", { ascending: false })
-      .limit(4),
+  let launchesQ = supabase
+    .from("products")
+    .select(PRODUCT_SELECT)
+    .eq("status", "active")
+    .eq("type", "new_mobile")
+    .gte("selling_price", 5000)
+    .order("created_at", { ascending: false })
+    .limit(12);
+  let usedQ = supabase
+    .from("products")
+    .select(PRODUCT_SELECT)
+    .eq("status", "active")
+    .eq("type", "used_mobile")
+    .order("created_at", { ascending: false })
+    .limit(8);
+  let featuredQ = supabase
+    .from("products")
+    .select("id, name, slug, selling_price, mrp, main_image_url, type, brand:brands(name)")
+    .eq("status", "active")
+    .eq("type", "new_mobile")
+    .gte("selling_price", 20000)
+    .not("main_image_url", "is", null)
+    .order("selling_price", { ascending: false })
+    .limit(1);
+
+  if (newPhoneCatId) {
+    launchesQ = launchesQ.eq("category_id", newPhoneCatId);
+    featuredQ = featuredQ.eq("category_id", newPhoneCatId);
+  } else {
+    launchesQ = excludeNonPhoneNameFilter(launchesQ);
+    featuredQ = excludeNonPhoneNameFilter(featuredQ);
+  }
+  if (usedPhoneCatId) {
+    usedQ = usedQ.eq("category_id", usedPhoneCatId);
+  } else {
+    usedQ = excludeNonPhoneNameFilter(usedQ);
+  }
+
+  const [launchesRes, usedRes, brandsRes, featuredRes, store] = await Promise.all([
+    launchesQ,
+    usedQ,
     supabase.from("brands").select("id, name, slug").order("name"),
-    supabase
-      .from("products")
-      .select(
-        "id, name, slug, selling_price, mrp, main_image_url, type, brand:brands(name)"
-      )
-      .eq("status", "active")
-      .eq("type", "new_mobile")
-      .gte("selling_price", 20000)
-      .not("main_image_url", "is", null)
-      .order("selling_price", { ascending: false })
-      .limit(6),
+    featuredQ,
+    getStorefrontProfile(),
   ]);
 
   const launches = (launchesRes.data || []) as HomeProduct[];
   const used = (usedRes.data || []) as HomeProduct[];
-  const featured = (featuredRes.data || []).slice(0, 3) as HomeProduct[];
+  const featured = (featuredRes.data || []) as HomeProduct[];
 
   const brandMap = new Map<string, { id: string; name: string; slug: string }>();
   for (const b of brandsRes.data || []) {
@@ -104,21 +129,20 @@ export default async function HomePage() {
     Boolean
   ) as { id: string; name: string; slug: string }[];
 
-  const heroProducts = (featured.length >= 2 ? featured : launches).slice(0, 3);
+  const heroProducts = (featured[0] ? featured : launches.slice(0, 1)) as HomeProduct[];
   const preownedHero = used[0] ?? null;
-  const store = await getStorefrontProfile();
   const brand = brandLogoParts(store.brand_name);
 
   return (
     <div className="ms-page">
-      <HomeHero featured={heroProducts} />
+      <HomeHero featured={heroProducts} store={store} />
 
       <HomeBrandRail brands={brands} />
 
       <HomeCategoryBrowse />
 
       {/* Just landed */}
-      <section id="launches" className="ms-section" aria-labelledby="launches-heading">
+      <section id="launches" className="ms-section ms-section--cv" aria-labelledby="launches-heading">
         <div className="ms-shell">
           <div className="ms-section-head">
             <div>
@@ -142,7 +166,11 @@ export default async function HomePage() {
           {launches.length > 0 ? (
             <div className="ms-product-rail">
               {launches.map((product, i) => (
-                <HomeProductTile key={product.id} product={product} priority={i < 4} />
+                <HomeProductTile
+                  key={product.id}
+                  product={product}
+                  priority={i === 0}
+                />
               ))}
             </div>
           ) : (
@@ -154,7 +182,7 @@ export default async function HomePage() {
       <HomePhoneFinder />
 
       {/* Curated collections */}
-      <section className="ms-section" aria-labelledby="collections-heading">
+      <section className="ms-section ms-section--cv" aria-labelledby="collections-heading">
         <div className="ms-shell">
           <div className="ms-section-head">
             <div>
@@ -188,7 +216,7 @@ export default async function HomePage() {
       </section>
 
       {/* Pre-owned */}
-      <section className="ms-section ms-preowned" aria-labelledby="preowned-heading">
+      <section className="ms-section ms-preowned ms-section--cv" aria-labelledby="preowned-heading">
         <div className="ms-shell">
           <div className="ms-preowned-grid">
             <div className="ms-preowned-copy">
@@ -214,13 +242,15 @@ export default async function HomePage() {
               <div className="ms-jaali ms-jaali--soft" aria-hidden />
               {preownedHero ? (
                 <Link href={`/product/${preownedHero.slug}`} className="ms-preowned-feature group">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={preownedHero.main_image_url || ""}
-                    alt={cleanProductName(preownedHero.name)}
-                    className="ms-preowned-img"
-                    loading="lazy"
-                  />
+                  <div className="ms-preowned-img-wrap">
+                    <ProductPhoto
+                      src={preownedHero.main_image_url}
+                      alt={cleanProductName(preownedHero.name)}
+                      fill
+                      sizes="(max-width: 768px) 90vw, 420px"
+                      className="ms-preowned-img ms-img-knockout"
+                    />
+                  </div>
                   <div className="ms-preowned-meta">
                     <p className="ms-meta">{brandLabel(preownedHero.brand)}</p>
                     <h3 className="ms-preowned-title">
@@ -245,7 +275,7 @@ export default async function HomePage() {
 
               {used.length > 1 && (
                 <div className="ms-preowned-mini">
-                  {used.slice(1, 3).map((p) => (
+                  {used.slice(1, 5).map((p) => (
                     <HomeProductTile key={p.id} product={p} tone="warm" />
                   ))}
                 </div>
@@ -255,10 +285,10 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <HomeOffersAndTrust />
+      <HomeOffersAndTrust brandName={store.brand_name} />
 
       {/* Closing */}
-      <section className="ms-close" aria-labelledby="close-heading">
+      <section className="ms-close ms-section--cv" aria-labelledby="close-heading">
         <div className="ms-shell">
           <p className="ms-eyebrow ms-eyebrow--on-dark">{brand.full} · Tiroda</p>
           <h2 id="close-heading" className="ms-display ms-display--lg ms-display--on-dark">

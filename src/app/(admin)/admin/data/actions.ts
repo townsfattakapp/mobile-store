@@ -510,3 +510,215 @@ export async function getOpsCounts() {
     },
   };
 }
+
+/** Hard-delete only rows already in Trash (deleted_at set). */
+export async function permanentlyDeleteOrder(orderId: string) {
+  const auth = await requireStaff();
+  if (auth.error || !auth.user) return { error: auth.error || "Unauthorized" };
+
+  const { data: row, error: findErr } = await auth.supabase
+    .from("orders")
+    .select("id, deleted_at")
+    .eq("id", orderId)
+    .maybeSingle();
+
+  if (findErr) {
+    if (missingCol(findErr)) return { error: migrationHint() };
+    return { error: findErr.message };
+  }
+  if (!row?.deleted_at) {
+    return { error: "Archive this order to Trash first, then permanently delete." };
+  }
+
+  // Invoices / items / history cascade from orders when FK is ON DELETE CASCADE
+  const { error } = await auth.supabase
+    .from("orders")
+    .delete()
+    .eq("id", orderId)
+    .not("deleted_at", "is", null);
+
+  if (error) return { error: error.message };
+  revalidateOps();
+  return { success: true };
+}
+
+export async function permanentlyDeleteInvoice(invoiceId: string) {
+  const auth = await requireStaff();
+  if (auth.error || !auth.user) return { error: auth.error || "Unauthorized" };
+
+  const { data: row, error: findErr } = await auth.supabase
+    .from("invoices")
+    .select("id, deleted_at")
+    .eq("id", invoiceId)
+    .maybeSingle();
+
+  if (findErr) {
+    if (missingCol(findErr)) return { error: migrationHint() };
+    return { error: findErr.message };
+  }
+  if (!row?.deleted_at) {
+    return { error: "Archive this invoice to Trash first, then permanently delete." };
+  }
+
+  const { error } = await auth.supabase
+    .from("invoices")
+    .delete()
+    .eq("id", invoiceId)
+    .not("deleted_at", "is", null);
+
+  if (error) return { error: error.message };
+  revalidateOps();
+  return { success: true };
+}
+
+export async function permanentlyDeleteWalkInCustomer(phoneKey: string) {
+  const auth = await requireStaff();
+  if (auth.error || !auth.user) return { error: auth.error || "Unauthorized" };
+
+  const { data: row, error: findErr } = await auth.supabase
+    .from("walk_in_customers")
+    .select("phone_key, deleted_at")
+    .eq("phone_key", phoneKey)
+    .maybeSingle();
+
+  if (findErr) {
+    if (missingCol(findErr)) return { error: migrationHint() };
+    return { error: findErr.message };
+  }
+  if (!row?.deleted_at) {
+    return { error: "Archive this walk-in to Trash first, then permanently delete." };
+  }
+
+  const { error } = await auth.supabase
+    .from("walk_in_customers")
+    .delete()
+    .eq("phone_key", phoneKey)
+    .not("deleted_at", "is", null);
+
+  if (error) return { error: error.message };
+  revalidateOps();
+  return { success: true };
+}
+
+export async function permanentlyDeleteRegisteredCustomer(profileId: string) {
+  const auth = await requireStaff();
+  if (auth.error || !auth.user) return { error: auth.error || "Unauthorized" };
+
+  const { data: row, error: findErr } = await auth.supabase
+    .from("profiles")
+    .select("id, role, deleted_at")
+    .eq("id", profileId)
+    .maybeSingle();
+
+  if (findErr) {
+    if (missingCol(findErr)) return { error: migrationHint() };
+    return { error: findErr.message };
+  }
+  if (!row || row.role !== "customer") {
+    return { error: "Only archived customer accounts can be permanently deleted." };
+  }
+  if (!row.deleted_at) {
+    return { error: "Archive this customer to Trash first, then permanently delete." };
+  }
+
+  try {
+    const { createAdminClient } = await import("@/utils/supabase/admin");
+    const admin = createAdminClient();
+    const { error } = await admin.auth.admin.deleteUser(profileId);
+    if (error) return { error: error.message };
+  } catch (e: any) {
+    return {
+      error:
+        e?.message ||
+        "Could not delete auth user. Ensure SUPABASE_SERVICE_ROLE_KEY is set, or keep the customer archived.",
+    };
+  }
+
+  revalidateOps();
+  return { success: true };
+}
+
+/** Permanently delete ALL items currently in Trash. */
+export async function emptyTrash() {
+  const auth = await requireStaff();
+  if (auth.error || !auth.user) return { error: auth.error || "Unauthorized" };
+
+  const [ordersRes, invoicesRes, walkinsRes, profilesRes] = await Promise.all([
+    auth.supabase.from("orders").select("id").not("deleted_at", "is", null),
+    auth.supabase.from("invoices").select("id").not("deleted_at", "is", null),
+    auth.supabase.from("walk_in_customers").select("phone_key").not("deleted_at", "is", null),
+    auth.supabase
+      .from("profiles")
+      .select("id")
+      .eq("role", "customer")
+      .not("deleted_at", "is", null),
+  ]);
+
+  if (missingCol(ordersRes.error)) return { error: migrationHint() };
+
+  let ordersDeleted = 0;
+  let invoicesDeleted = 0;
+  let walkinsDeleted = 0;
+  let profilesDeleted = 0;
+
+  const orderIds = (ordersRes.data || []).map((o) => o.id);
+  for (let i = 0; i < orderIds.length; i += 50) {
+    const chunk = orderIds.slice(i, i + 50);
+    const { error, count } = await auth.supabase
+      .from("orders")
+      .delete({ count: "exact" })
+      .in("id", chunk)
+      .not("deleted_at", "is", null);
+    if (error) return { error: error.message };
+    ordersDeleted += count ?? chunk.length;
+  }
+
+  const invIds = (invoicesRes.data || []).map((o) => o.id);
+  for (let i = 0; i < invIds.length; i += 50) {
+    const chunk = invIds.slice(i, i + 50);
+    const { error, count } = await auth.supabase
+      .from("invoices")
+      .delete({ count: "exact" })
+      .in("id", chunk)
+      .not("deleted_at", "is", null);
+    if (error) return { error: error.message };
+    invoicesDeleted += count ?? chunk.length;
+  }
+
+  if (!walkinsRes.error) {
+    const keys = (walkinsRes.data || []).map((w) => w.phone_key);
+    for (let i = 0; i < keys.length; i += 50) {
+      const chunk = keys.slice(i, i + 50);
+      const { error, count } = await auth.supabase
+        .from("walk_in_customers")
+        .delete({ count: "exact" })
+        .in("phone_key", chunk)
+        .not("deleted_at", "is", null);
+      if (error) return { error: error.message };
+      walkinsDeleted += count ?? chunk.length;
+    }
+  }
+
+  const profileIds = (profilesRes.data || []).map((p) => p.id);
+  if (profileIds.length) {
+    try {
+      const { createAdminClient } = await import("@/utils/supabase/admin");
+      const admin = createAdminClient();
+      for (const id of profileIds) {
+        const { error } = await admin.auth.admin.deleteUser(id);
+        if (!error) profilesDeleted += 1;
+      }
+    } catch {
+      // Leave archived profiles if service role missing
+    }
+  }
+
+  revalidateOps();
+  return {
+    success: true,
+    ordersDeleted,
+    invoicesDeleted,
+    walkinsDeleted,
+    profilesDeleted,
+  };
+}

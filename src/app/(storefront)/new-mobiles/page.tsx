@@ -6,6 +6,9 @@ import { PlpToolbar } from "@/components/storefront/PlpToolbar";
 import {
   PLP_PAGE_SIZE,
   PRODUCT_CARD_SELECT_INNER_BRAND,
+  SMARTPHONE_CATEGORY_SLUG,
+  excludeNonPhoneNameFilter,
+  getCategoryIdBySlug,
 } from "@/lib/storefront/productQueries";
 
 export const revalidate = 60;
@@ -25,12 +28,22 @@ export default async function NewMobilesPage({
   const to = from + PLP_PAGE_SIZE - 1;
 
   const supabase = await createClient();
+  const phoneCategoryId = await getCategoryIdBySlug(
+    supabase,
+    SMARTPHONE_CATEGORY_SLUG.new
+  );
 
   let productQuery = supabase
     .from("products")
     .select(PRODUCT_CARD_SELECT_INNER_BRAND, { count: "exact" })
     .eq("type", "new_mobile")
     .eq("status", "active");
+
+  if (phoneCategoryId) {
+    productQuery = productQuery.eq("category_id", phoneCategoryId);
+  } else {
+    productQuery = excludeNonPhoneNameFilter(productQuery);
+  }
 
   if (brandFilter) {
     productQuery = productQuery.ilike("brands.name", `%${brandFilter}%`);
@@ -52,11 +65,17 @@ export default async function NewMobilesPage({
 
   productQuery = productQuery.range(from, to);
 
-  const brandsQuery = supabase
+  let brandsQuery = supabase
     .from("products")
     .select("brand:brands!inner(name)")
     .eq("type", "new_mobile")
     .eq("status", "active");
+
+  if (phoneCategoryId) {
+    brandsQuery = brandsQuery.eq("category_id", phoneCategoryId);
+  } else {
+    brandsQuery = excludeNonPhoneNameFilter(brandsQuery);
+  }
 
   const [{ data: brandRows }, { data: products, count }] = await Promise.all([
     brandsQuery,
@@ -106,12 +125,14 @@ export default async function NewMobilesPage({
       <div className="ms-plp-hero">
         <div className="ms-plp-hero-inner">
           <h1 className="ms-plp-title">
-            Store.{" "}
+            Mobiles.{" "}
             <span className="ms-plp-title-muted">
-              The best way to buy the products you love.
+              New phones only — latest launches and everyday picks.
             </span>
           </h1>
-          <p className="ms-plp-lede">Latest models. Best prices. Delivered to your door.</p>
+          <p className="ms-plp-lede">
+            Smartphones for Tiroda. Tablets and laptops live in their own shop sections.
+          </p>
         </div>
       </div>
 

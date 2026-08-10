@@ -8,8 +8,13 @@ import { Button } from "@/components/ui/Button";
 import {
   archiveAllCustomers,
   archiveAllOrdersAndInvoices,
+  emptyTrash,
   getOpsCounts,
   listTrash,
+  permanentlyDeleteInvoice,
+  permanentlyDeleteOrder,
+  permanentlyDeleteRegisteredCustomer,
+  permanentlyDeleteWalkInCustomer,
   restoreInvoice,
   restoreOrder,
   restoreRegisteredCustomer,
@@ -105,13 +110,61 @@ export default function AdminDataPage() {
     else await reload();
   };
 
+  const confirmPermanent = (label: string) => {
+    if (
+      !window.confirm(
+        `${label}\n\nThis cannot be undone. Type DELETE on the next prompt to confirm.`
+      )
+    ) {
+      return false;
+    }
+    const typed = window.prompt('Type DELETE to permanently remove:');
+    return typed?.trim().toUpperCase() === "DELETE";
+  };
+
+  const doPermanent = async (
+    label: string,
+    fn: () => Promise<{ error?: string; success?: boolean }>
+  ) => {
+    if (!confirmPermanent(label)) return;
+    setBusy("purge");
+    const res = await fn();
+    setBusy(null);
+    if (res.error) alert(res.error);
+    else {
+      setMessage("Permanently deleted.");
+      await reload();
+    }
+  };
+
+  const runEmptyTrash = async () => {
+    if (
+      !confirmPermanent(
+        "Empty Trash? All archived orders, invoices, and customers will be permanently deleted."
+      )
+    ) {
+      return;
+    }
+    setBusy("empty");
+    const res = await emptyTrash();
+    setBusy(null);
+    if (res.error) {
+      alert(res.error);
+      return;
+    }
+    setMessage(
+      `Emptied trash: ${res.ordersDeleted ?? 0} orders, ${res.invoicesDeleted ?? 0} invoices, ${res.walkinsDeleted ?? 0} walk-ins, ${res.profilesDeleted ?? 0} customers.`
+    );
+    await reload();
+  };
+
   return (
     <div className="max-w-5xl mx-auto space-y-8 pb-16">
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-[#1d1d1f]">Data & Trash</h1>
         <p className="text-sm text-[#6e6e73] mt-1">
-          Soft-delete mistakes or clear test data. Archived rows stay in Trash and can be restored —
-          nothing is permanently wiped from here.
+          Soft-delete mistakes or clear test data. Archived rows stay in Trash until you restore or
+          permanently delete them.
         </p>
       </div>
 
@@ -197,14 +250,29 @@ export default function AdminDataPage() {
       </section>
 
       <section className="rounded-xl border bg-white shadow-sm overflow-hidden">
-        <div className="p-5 border-b flex items-center justify-between gap-3">
+        <div className="p-5 border-b flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold">Trash</h2>
-            <p className="text-sm text-[#6e6e73]">Restore anything archived by mistake.</p>
+            <p className="text-sm text-[#6e6e73]">
+              Restore, or permanently delete after typing DELETE.
+            </p>
           </div>
-          <Button variant="outline" size="sm" onClick={reload} disabled={loading}>
-            Refresh
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={reload} disabled={loading}>
+              Refresh
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2 text-red-700 border-red-200 hover:bg-red-50"
+              isLoading={busy === "empty"}
+              disabled={!!busy || loading}
+              onClick={runEmptyTrash}
+            >
+              <Trash2 className="w-4 h-4" />
+              Empty trash
+            </Button>
+          </div>
         </div>
 
         {loading ? (
@@ -238,14 +306,29 @@ export default function AdminDataPage() {
                         <p className="text-xs text-[#6e6e73]">Reason: {o.delete_reason}</p>
                       ) : null}
                     </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="gap-2 shrink-0"
-                      onClick={() => doRestore(() => restoreOrder(o.id))}
-                    >
-                      <RotateCcw className="w-4 h-4" /> Restore
-                    </Button>
+                    <div className="flex flex-wrap gap-2 shrink-0">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-2"
+                        onClick={() => doRestore(() => restoreOrder(o.id))}
+                      >
+                        <RotateCcw className="w-4 h-4" /> Restore
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-2 text-red-700 border-red-200 hover:bg-red-50"
+                        disabled={busy === "purge"}
+                        onClick={() =>
+                          doPermanent(`Permanently delete order ${o.order_number}?`, () =>
+                            permanentlyDeleteOrder(o.id)
+                          )
+                        }
+                      >
+                        <Trash2 className="w-4 h-4" /> Delete forever
+                      </Button>
+                    </div>
                   </div>
                 );
               }}
@@ -273,14 +356,29 @@ export default function AdminDataPage() {
                       <p className="text-xs text-[#6e6e73]">Reason: {inv.delete_reason}</p>
                     ) : null}
                   </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-2 shrink-0"
-                    onClick={() => doRestore(() => restoreInvoice(inv.id))}
-                  >
-                    <RotateCcw className="w-4 h-4" /> Restore
-                  </Button>
+                  <div className="flex flex-wrap gap-2 shrink-0">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-2"
+                      onClick={() => doRestore(() => restoreInvoice(inv.id))}
+                    >
+                      <RotateCcw className="w-4 h-4" /> Restore
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-2 text-red-700 border-red-200 hover:bg-red-50"
+                      disabled={busy === "purge"}
+                      onClick={() =>
+                        doPermanent(`Permanently delete invoice ${inv.invoice_number}?`, () =>
+                          permanentlyDeleteInvoice(inv.id)
+                        )
+                      }
+                    >
+                      <Trash2 className="w-4 h-4" /> Delete forever
+                    </Button>
+                  </div>
                 </div>
               )}
             />
@@ -304,14 +402,30 @@ export default function AdminDataPage() {
                         : ""}
                     </p>
                   </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-2 shrink-0"
-                    onClick={() => doRestore(() => restoreRegisteredCustomer(p.id))}
-                  >
-                    <RotateCcw className="w-4 h-4" /> Restore
-                  </Button>
+                  <div className="flex flex-wrap gap-2 shrink-0">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-2"
+                      onClick={() => doRestore(() => restoreRegisteredCustomer(p.id))}
+                    >
+                      <RotateCcw className="w-4 h-4" /> Restore
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-2 text-red-700 border-red-200 hover:bg-red-50"
+                      disabled={busy === "purge"}
+                      onClick={() =>
+                        doPermanent(
+                          `Permanently delete customer ${p.full_name || p.email || p.id}?`,
+                          () => permanentlyDeleteRegisteredCustomer(p.id)
+                        )
+                      }
+                    >
+                      <Trash2 className="w-4 h-4" /> Delete forever
+                    </Button>
+                  </div>
                 </div>
               )}
             />
@@ -335,14 +449,30 @@ export default function AdminDataPage() {
                         : ""}
                     </p>
                   </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-2 shrink-0"
-                    onClick={() => doRestore(() => restoreWalkInCustomer(w.phone_key))}
-                  >
-                    <RotateCcw className="w-4 h-4" /> Restore
-                  </Button>
+                  <div className="flex flex-wrap gap-2 shrink-0">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-2"
+                      onClick={() => doRestore(() => restoreWalkInCustomer(w.phone_key))}
+                    >
+                      <RotateCcw className="w-4 h-4" /> Restore
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-2 text-red-700 border-red-200 hover:bg-red-50"
+                      disabled={busy === "purge"}
+                      onClick={() =>
+                        doPermanent(
+                          `Permanently delete walk-in ${w.full_name || w.phone_key}?`,
+                          () => permanentlyDeleteWalkInCustomer(w.phone_key)
+                        )
+                      }
+                    >
+                      <Trash2 className="w-4 h-4" /> Delete forever
+                    </Button>
+                  </div>
                 </div>
               )}
             />
