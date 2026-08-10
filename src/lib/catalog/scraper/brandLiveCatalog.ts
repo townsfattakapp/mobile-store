@@ -564,13 +564,42 @@ export async function fetchLiveBrandCatalog(
     const host = u.hostname.replace(/^www\./, "").toLowerCase();
     const path = u.pathname.replace(/\/+$/, "") || "/";
 
-    if (host.includes("vivo.com")) {
+    if (host.includes("vivo.com") || host.includes("shop.vivo.com")) {
+      const {
+        fetchVivoShopCatalog,
+        isVivoShopListingUrl,
+        isVivoShopProductUrl,
+      } = await import("./liveBrandCatalogs");
+      // Single PDP — catalog expand is wrong here
+      if (isVivoShopProductUrl(pageUrl)) return null;
+      // Prefer live e-store cards (shop.vivo.com) when available
       if (
+        isVivoShopListingUrl(pageUrl) ||
+        (host.includes("shop.vivo.com") && /\/products\/phone/i.test(path)) ||
         path === "/" ||
         path === "/in" ||
         /\/products\/?$/i.test(path)
       ) {
-        return fetchVivoCatalog();
+        const shopUrl =
+          host.includes("shop.vivo.com") && /\/products\/phone/i.test(path)
+            ? pageUrl
+            : "https://shop.vivo.com/in/products/phone";
+        const shop = await fetchVivoShopCatalog(shopUrl);
+        if (shop.length >= 4) {
+          // www hub: merge shop cards with sitemap so older SKUs stay available
+          if (!host.includes("shop.vivo.com")) {
+            const sitemap = await fetchVivoCatalog();
+            return mergeItems(shop, sitemap);
+          }
+          return shop;
+        }
+        if (
+          path === "/" ||
+          path === "/in" ||
+          /\/products\/?$/i.test(path)
+        ) {
+          return fetchVivoCatalog();
+        }
       }
       return null;
     }

@@ -140,8 +140,12 @@ export function isCategoryUrl(url: string): boolean {
       );
     }
     if (host.includes("vivo.com")) {
-      // Only the listing hub — not /products/x300 PDPs
+      // Only the listing hub — not /products/x300 or /product/123 PDPs
       if (path === "/in" || path === "/" || /\/products\/?$/i.test(path)) return true;
+      // Official e-store phone listing (same pattern as shop.iqoo.com)
+      if (host.includes("shop.vivo.com") && /\/products\/phone/i.test(path)) return true;
+      // Never treat shop PDP /product/{id} as a category
+      if (host.includes("shop.vivo.com") && /\/product\/\d+/i.test(path)) return false;
     }
     if (host.includes("oppo.com")) {
       if (
@@ -270,7 +274,17 @@ export function isCategoryUrl(url: string): boolean {
 /** True for single-product PDPs — never treat these as multi-item expand hubs */
 export function isLikelyProductUrl(url: string): boolean {
   try {
+    // Listing hubs must never be treated as a single-product PDP
+    if (isCategoryUrl(url)) return false;
+
     const path = new URL(url).pathname.toLowerCase();
+    // vivo / iQOO official e-store PDP: /in/product/10364
+    if (
+      /shop\.(vivo|iqoo)\.com/i.test(url) &&
+      /\/product\/\d+/i.test(path)
+    ) {
+      return true;
+    }
     if (/\/products?\/[^/]+/i.test(path)) return true;
     if (/\/product-detail\//i.test(path)) return true;
     if (/\/shop\/buy-/i.test(path)) return true;
@@ -727,6 +741,16 @@ function extractGenericProducts(
 export class CategoryScraper {
   public async fetchCategoryLinks(url: string): Promise<ScrapedCategoryItem[]> {
     try {
+      // Never expand a single-product PDP into a “discovered models” list
+      {
+        const { isVivoShopProductUrl } = await import("./vivoShop");
+        if (isVivoShopProductUrl(url)) return [];
+      }
+      if (isLikelyProductUrl(url) && !isCategoryUrl(url)) {
+        // Allow Samsung family URLs that are also listing-ish; block clear PDPs
+        if (!/samsung\.com/i.test(url)) return [];
+      }
+
       // Samsung India: public finder API (JS listing page has almost no PDP links)
       if (/samsung\.com/i.test(url)) {
         const {
@@ -835,6 +859,35 @@ export class CategoryScraper {
         if (isNothingProductUrl(url)) return [];
       }
 
+      // Vivo e-store listing FIRST — must not fall through to Shopify false-positive
+      // (shop.vivo HTML matches /products/… and previously invented /products/{slug} junk)
+      if (/shop\.vivo\.com|vivo\.com/i.test(url)) {
+        const {
+          fetchVivoShopCatalog,
+          isVivoShopListingUrl,
+          isVivoShopProductUrl,
+        } = await import("./liveBrandCatalogs");
+        if (isVivoShopProductUrl(url)) return [];
+        if (
+          isVivoShopListingUrl(url) ||
+          (isCategoryUrl(url) && /vivo\.com/i.test(url))
+        ) {
+          const live = await fetchVivoShopCatalog(
+            /shop\.vivo\.com.*\/products\/phone/i.test(url)
+              ? url
+              : "https://shop.vivo.com/in/products/phone"
+          );
+          if (live.length >= 4) {
+            return live.map((i) => ({
+              name: i.name,
+              url: i.url,
+              kind: "product" as const,
+              ...((i as any).image ? { image: (i as any).image } : {}),
+            }));
+          }
+        }
+      }
+
       // Live brand hubs (sitemap + nav) — vivo / OPPO / OnePlus / Google / POCO /
       // Motorola / Lava / HMD / realme / Xiaomi / iQOO
       {
@@ -899,6 +952,43 @@ export class CategoryScraper {
         }
       }
 
+      // Live Vivo e-store phone listing (shop.vivo.com — same card SSR as iQOO shop)
+      {
+        const {
+          fetchVivoShopCatalog,
+          isVivoShopListingUrl,
+          isVivoShopProductUrl,
+        } = await import("./liveBrandCatalogs");
+        if (isVivoShopProductUrl(url)) return [];
+        if (isVivoShopListingUrl(url)) {
+          const live = await fetchVivoShopCatalog(
+            /shop\.vivo\.com.*\/products\/phone/i.test(url)
+              ? url
+              : "https://shop.vivo.com/in/products/phone"
+          );
+          if (live.length >= 4) {
+            return live.map((i) => ({
+              name: i.name,
+              url: i.url,
+              kind: "product" as const,
+              ...((i as any).image ? { image: (i as any).image } : {}),
+            }));
+          }
+        }
+        // www.vivo.com /products hub → prefer shop live list (fresher than sitemap alone)
+        if (/vivo\.com/i.test(url) && isCategoryUrl(url) && !/shop\.vivo\.com/i.test(url)) {
+          const live = await fetchVivoShopCatalog();
+          if (live.length >= 4) {
+            return live.map((i) => ({
+              name: i.name,
+              url: i.url,
+              kind: "product" as const,
+              ...((i as any).image ? { image: (i as any).image } : {}),
+            }));
+          }
+        }
+      }
+
       // Live Xiaomi India category pages (phone / tablet / watch-audio / TV / store)
       {
         const {
@@ -952,16 +1042,20 @@ export class CategoryScraper {
       }
 
       // Shopify stores: prefer public products.json catalog (Ambrane, etc.)
+      // Never treat vivo / iQOO Nuxt e-stores as Shopify
       {
+        const isVivoOrIqooHost = /(?:shop\.)?(vivo|iqoo)\.com/i.test(url);
         const {
           fetchShopifyCatalog,
           extractShopifyProductLinksFromHtml,
           isShopifyHtml,
         } = await import("./shopify");
 
-        const shopifyItems = await fetchShopifyCatalog(url);
-        if (shopifyItems.length > 0) {
-          return shopifyItems.map((i) => ({ ...i, kind: "product" as const }));
+        if (!isVivoOrIqooHost) {
+          const shopifyItems = await fetchShopifyCatalog(url);
+          if (shopifyItems.length > 0) {
+            return shopifyItems.map((i) => ({ ...i, kind: "product" as const }));
+          }
         }
 
         // Fall through to HTML if products.json blocked / empty
@@ -998,7 +1092,7 @@ export class CategoryScraper {
               if (!keys.has(f.name.toLowerCase())) items.push(f);
             }
           }
-        } else if (isShopifyHtml(html)) {
+        } else if (!isVivoOrIqooHost && isShopifyHtml(html)) {
           const fromHtml = extractShopifyProductLinksFromHtml(html, url);
           items = fromHtml.map((i) => ({ ...i, kind: "product" as const }));
           if (items.length < 3) {

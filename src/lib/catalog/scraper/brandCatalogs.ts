@@ -49,6 +49,7 @@ export function googlePixelCatalog(): BrandCatalogItem[] {
 
 /** vivo India products hub */
 export function vivoCatalog(): BrandCatalogItem[] {
+  // Last-resort fallback if shop.vivo Nuxt listing is down
   const base = "https://www.vivo.com/in/products";
   return [
     item("vivo", "vivo X300 Ultra", `${base}/x300-ultra`),
@@ -57,8 +58,15 @@ export function vivoCatalog(): BrandCatalogItem[] {
     item("vivo", "vivo X300", `${base}/x300`),
     item("vivo", "vivo X Fold 5", `${base}/x-fold5`),
     item("vivo", "vivo V70 Elite", `${base}/v70-elite`),
+    item("vivo", "vivo V70 FE", `${base}/v70-fe`),
     item("vivo", "vivo V70", `${base}/v70`),
+    item("vivo", "vivo Y51 Pro 5G", `${base}/y51-pro-5g`),
+    item("vivo", "vivo Y400 5G", `${base}/y400-5g`),
     item("vivo", "vivo Y31 5G", `${base}/y31-5g`),
+    item("vivo", "vivo Y21 5G", `${base}/y21-5g`),
+    item("vivo", "vivo Y11 5G", `${base}/y11-5g`),
+    item("vivo", "vivo Y05", `${base}/y05`),
+    item("vivo", "vivo T5 Pro 5G", `${base}/t5-pro-5g`),
     item("vivo", "vivo T5x", `${base}/t5x`),
     item("vivo", "vivo T5 Lite 5G", `${base}/t5-lite-5g`),
     item("vivo", "vivo T5e", `${base}/t5e`),
@@ -207,7 +215,12 @@ export function getCuratedBrandCatalog(pageUrl: string): BrandCatalogItem[] | nu
     if (host.includes("store.google.com")) {
       return googlePixelCatalog();
     }
-    if (host.includes("vivo.com") && (/\/products\/?$|\/in\/?$/.test(path) || path === "/")) {
+    if (
+      host.includes("vivo.com") &&
+      (/\/products\/?$|\/in\/?$/.test(path) ||
+        path === "/" ||
+        (host.includes("shop.vivo.com") && /\/products\/phone/i.test(path)))
+    ) {
       return vivoCatalog();
     }
     if (

@@ -51,6 +51,16 @@ export async function enrichWithMarketplacePricing<
     !fetched?.main_image_url ||
     isJunkBrandImage(fetched.main_image_url || "");
 
+  // Keep authoritative vivo e-store scrapes intact (don't Flipkart-rename)
+  if (
+    fetched &&
+    /scraper_vivo_shop/i.test(String(fetched.source_provider || "")) &&
+    !needsMrp &&
+    !needsImage
+  ) {
+    return fetched;
+  }
+
   if (!needsMrp && !needsImage && fetched) return fetched;
 
   const offer = await lookupMarketplaceMrp(name || String(opts?.nameHint), brand);

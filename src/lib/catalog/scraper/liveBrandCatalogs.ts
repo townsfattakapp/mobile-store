@@ -330,6 +330,15 @@ export function isIqooShopListingUrl(url: string): boolean {
   }
 }
 
+/** Re-export shop.vivo.com listing + helpers (Nuxt productList → real PDPs) */
+export {
+  fetchVivoShopCatalog,
+  isVivoShopListingUrl,
+  isVivoShopProductUrl,
+  isVivoShopHost,
+  fetchVivoShopProduct,
+} from "./vivoShop";
+
 export function isXiaomiPhoneListingUrl(url: string): boolean {
   return miCategoryFromUrl(url) === "phone" || miCategoryFromUrl(url) === "all";
 }

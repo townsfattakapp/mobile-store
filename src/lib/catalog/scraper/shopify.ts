@@ -32,12 +32,16 @@ const UA =
 
 export function isShopifyHtml(html: string): boolean {
   const h = html.toLowerCase();
+  // Require real Shopify signals — do NOT key off bare "/products/" paths
+  // (vivo/iQOO Nuxt e-stores match that pattern and are not Shopify).
   return (
     h.includes("cdn.shopify.com") ||
     h.includes("shopify.theme") ||
     h.includes("shopify-digital-wallet") ||
     h.includes("myshopify.com") ||
-    /\/products\/[^"'>\s]+/.test(html)
+    h.includes("shopify-section") ||
+    h.includes("shopify.routes") ||
+    h.includes("shopify.shop")
   );
 }
 
@@ -216,6 +220,21 @@ export function extractShopifyProductLinksFromHtml(
   html: string,
   pageUrl: string
 ): { name: string; url: string }[] {
+  // Never invent Shopify PDP URLs for known non-Shopify brand e-stores
+  try {
+    const host = new URL(pageUrl).hostname.toLowerCase();
+    if (
+      /(?:^|\.)(shop\.)?(vivo|iqoo)\.com$/i.test(host) ||
+      host.includes("vivo.com") ||
+      host.includes("iqoo.com")
+    ) {
+      return [];
+    }
+  } catch {
+    /* continue */
+  }
+  if (!isShopifyHtml(html)) return [];
+
   const origin = shopOrigin(pageUrl);
   const seen = new Set<string>();
   const items: { name: string; url: string }[] = [];
@@ -224,7 +243,7 @@ export function extractShopifyProductLinksFromHtml(
   while ((m = re.exec(html)) !== null) {
     const handle = decodeURIComponent(m[1]).replace(/\/$/, "");
     if (!handle || seen.has(handle)) continue;
-    if (/^(cart|compare|search)$/i.test(handle)) continue;
+    if (/^(cart|compare|search|phone|accessories)$/i.test(handle)) continue;
     seen.add(handle);
     const name = handle
       .split("-")

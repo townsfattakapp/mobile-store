@@ -23,6 +23,7 @@ export class GenericBrandAdapter implements ScraperAdapter {
   private knownDomains: Record<string, string> = {
     "store.google.com": "Google",
     "vivo.com": "Vivo",
+    "shop.vivo.com": "Vivo",
     "oppo.com": "Oppo",
     "iqoo.com": "iQOO",
     "shop.iqoo.com": "iQOO",
@@ -77,6 +78,14 @@ export class GenericBrandAdapter implements ScraperAdapter {
   async scrape(url: string, html: string): Promise<Partial<MasterDevice> | null> {
     // Never treat brand hubs / category pages as a single device
     if (await this.shouldRefuseAsHub(url)) return null;
+
+    // vivo Official E-Store PDP (Nuxt __NUXT__ SKU matrix)
+    if (/shop\.vivo\.com/i.test(url)) {
+      const vivo = await this.scrapeVivoShop(url);
+      if (vivo) return vivo;
+      const { isVivoShopProductUrl } = await import("../vivoShop");
+      if (isVivoShopProductUrl(url)) return null;
+    }
 
     // OEM sites that block scrapers (Dell 403 / Acer down): marketplace rebuild
     {
@@ -254,7 +263,8 @@ export class GenericBrandAdapter implements ScraperAdapter {
           path === "/in" ||
           /\/(products|smartphones|phones|phone|store)\/?$/i.test(path) ||
           /store\.google\.com.*\/category\//i.test(url) ||
-          /shop\.iqoo\.com.*\/products\/phone/i.test(url)
+          /shop\.iqoo\.com.*\/products\/phone/i.test(url) ||
+          /shop\.vivo\.com.*\/products\/phone/i.test(url)
         ) {
           return true;
         }
@@ -282,6 +292,14 @@ export class GenericBrandAdapter implements ScraperAdapter {
     if (isGooglePixelHubUrl(url)) return null;
     if (!isGooglePixelProductUrl(url)) return null;
     return fetchGooglePixelProduct(url);
+  }
+
+  private async scrapeVivoShop(url: string): Promise<Partial<MasterDevice> | null> {
+    const { fetchVivoShopProduct, isVivoShopProductUrl, isVivoShopListingUrl } =
+      await import("../vivoShop");
+    if (isVivoShopListingUrl(url)) return null;
+    if (!isVivoShopProductUrl(url)) return null;
+    return fetchVivoShopProduct(url);
   }
 
   private async scrapeMotorola(

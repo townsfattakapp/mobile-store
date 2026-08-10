@@ -92,7 +92,11 @@ export const IMPORT_SOURCE_GROUPS: ImportSourceGroup[] = [
         url: "https://store.google.com/in/category/phones?hl=en-IN",
       },
       { name: "Nothing", url: "https://in.nothing.tech/collections/phones" },
-      { name: "Vivo", url: "https://www.vivo.com/in/products" },
+      {
+        name: "Vivo",
+        url: "https://shop.vivo.com/in/products/phone",
+        note: "E-store phones",
+      },
       { name: "Oppo", url: "https://www.oppo.com/in/smartphones/" },
       { name: "Xiaomi", url: "https://www.mi.com/in/" },
       { name: "Poco", url: "https://www.poco.in/" },

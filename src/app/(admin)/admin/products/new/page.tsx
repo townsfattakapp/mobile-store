@@ -182,13 +182,17 @@ export default function NewProductPage() {
           const isUrl =
             searchQuery.startsWith("http://") || searchQuery.startsWith("https://");
           if (isUrl && results.length === 0) {
-            // Auto-scan category / brand pages so user sees models immediately
-            const scan = await bulkScrapeCategoryLinks(searchQuery);
-            if (scan.success && scan.items && scan.items.length > 0) {
-              await applyDiscoveredLinks(
-                scan.items,
-                scan.message || `Found ${scan.items.length} models on this page`
-              );
+            // Don't auto-expand single e-store PDPs (e.g. shop.vivo.com/in/product/10364)
+            // — those must run through Scrape & Add as one device.
+            const isSingleProductPdp = /\/product\/\d+/i.test(searchQuery);
+            if (!isSingleProductPdp) {
+              const scan = await bulkScrapeCategoryLinks(searchQuery);
+              if (scan.success && scan.items && scan.items.length > 0) {
+                await applyDiscoveredLinks(
+                  scan.items,
+                  scan.message || `Found ${scan.items.length} models on this page`
+                );
+              }
             }
           }
           setIsSearching(false);

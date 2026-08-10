@@ -313,6 +313,8 @@ export function isWeakPhoneScrape(device: {
     /logo|icon|favicon|placeholder|shield/i.test(device.main_image_url);
 
   if (onlyFake) return true;
+  // Official vivo e-store Nuxt scrape is authoritative — don't Flipkart-rewrite
+  if (/scraper_vivo_shop/i.test(String(device.source_provider || ""))) return false;
   if (onlyFake || (noMrp && badImage)) return true;
   if (variants.every((v: any) => /^standard$/i.test(String(v.color || ""))) &&
       variants.length <= 2) {
