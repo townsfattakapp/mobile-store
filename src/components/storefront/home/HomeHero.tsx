@@ -6,16 +6,16 @@ import {
   formatINR,
 } from "@/lib/storefront/format";
 import type { HomeProduct } from "./HomeProductTile";
-import { getStorefrontProfile } from "@/lib/store/profile";
-import { ProductImage } from "@/components/storefront/ProductImage";
+import type { StorefrontProfile } from "@/lib/store/profile-shared";
+import { ProductPhoto } from "@/components/storefront/ProductPhoto";
 
 type Props = {
   featured: HomeProduct[];
+  store: StorefrontProfile;
 };
 
-export async function HomeHero({ featured }: Props) {
+export function HomeHero({ featured, store }: Props) {
   const primary = featured[0] ?? null;
-  const store = await getStorefrontProfile();
   const headline = store.hero_headline;
   const accentMatch = headline.match(/^(.*?\s)([\w'’]+(?:\s+[\w'’]+){0,2})\.?$/);
   const headlineLead = accentMatch ? accentMatch[1] : headline;
@@ -91,13 +91,14 @@ export async function HomeHero({ featured }: Props) {
               className="ms-hero-device ms-hero-device--solo ms-float"
               aria-label={cleanProductName(primary.name)}
             >
-              <ProductImage
+              <ProductPhoto
                 src={primary.main_image_url}
                 alt={cleanProductName(primary.name)}
                 priority
                 width={520}
                 height={640}
-                sizes="(max-width: 900px) 70vw, 420px"
+                quality={78}
+                sizes="(max-width: 640px) 55vw, (max-width: 900px) 50vw, 400px"
                 className="ms-hero-device-img ms-img-knockout"
               />
             </Link>

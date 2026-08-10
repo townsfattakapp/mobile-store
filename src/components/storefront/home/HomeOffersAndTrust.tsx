@@ -1,8 +1,5 @@
-"use client";
-
 import Link from "next/link";
 import { ArrowUpRight, BadgeCheck, CreditCard, ShieldCheck, Truck, Wrench, Sparkles } from "lucide-react";
-import { useStoreConfig } from "@/components/storefront/StoreConfigProvider";
 import { brandLogoParts } from "@/lib/store/profile-shared";
 
 const TRUST = [
@@ -32,13 +29,13 @@ const OFFERS = [
   },
 ];
 
-export function HomeOffersAndTrust() {
-  const store = useStoreConfig();
-  const brand = brandLogoParts(store.brand_name);
+/** Server Component — no client bundle cost for static offers/trust. */
+export function HomeOffersAndTrust({ brandName }: { brandName: string }) {
+  const brand = brandLogoParts(brandName);
 
   return (
     <>
-      <section id="offers" className="ms-section" aria-labelledby="offers-heading">
+      <section id="offers" className="ms-section ms-section--cv" aria-labelledby="offers-heading">
         <div className="ms-shell">
           <div className="ms-section-head">
             <div>
@@ -67,7 +64,7 @@ export function HomeOffersAndTrust() {
         </div>
       </section>
 
-      <section className="ms-section ms-section--trust" aria-labelledby="trust-heading">
+      <section className="ms-section ms-section--trust ms-section--cv" aria-labelledby="trust-heading">
         <div className="ms-shell">
           <div className="ms-section-head">
             <div>
