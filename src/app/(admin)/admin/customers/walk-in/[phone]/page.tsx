@@ -17,6 +17,7 @@ import {
   updateWalkInCustomer,
   type CustomerStatus,
 } from "../../actions";
+import { WalkInArchiveControls } from "@/components/admin/ArchiveControls";
 
 function statusBadge(status: string) {
   switch (status) {
@@ -57,6 +58,7 @@ export default function WalkInCustomerPage({
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [crmReady, setCrmReady] = useState(true);
+  const [archived, setArchived] = useState(false);
 
   const [fullName, setFullName] = useState("");
   const [displayPhone, setDisplayPhone] = useState("");
@@ -72,14 +74,26 @@ export default function WalkInCustomerPage({
     setLoading(true);
     setError(null);
 
-    const { data: guestOrders } = await supabase
+    let { data: guestOrders, error: guestErr } = await supabase
       .from("orders")
       .select(
         "id, order_number, grand_total, payment_method, payment_status, status, created_at, notes, address_snapshot"
       )
       .is("user_id", null)
+      .is("deleted_at", null)
       .order("created_at", { ascending: false })
       .limit(1000);
+
+    if (guestErr && /deleted_at|column|schema cache/i.test(guestErr.message)) {
+      ({ data: guestOrders } = await supabase
+        .from("orders")
+        .select(
+          "id, order_number, grand_total, payment_method, payment_status, status, created_at, notes, address_snapshot"
+        )
+        .is("user_id", null)
+        .order("created_at", { ascending: false })
+        .limit(1000));
+    }
 
     const matched = (guestOrders || []).filter((o) => {
       const addr = normalizeAddress(o.address_snapshot);
@@ -101,11 +115,19 @@ export default function WalkInCustomerPage({
 
     const orderIds = matched.map((o) => o.id);
     if (orderIds.length) {
-      const { data: inv } = await supabase
+      let { data: inv, error: invErr } = await supabase
         .from("invoices")
         .select("id, invoice_number, invoice_date, order_id, created_at, customer_snapshot")
         .in("order_id", orderIds)
+        .is("deleted_at", null)
         .order("created_at", { ascending: false });
+      if (invErr && /deleted_at|column|schema cache/i.test(invErr.message)) {
+        ({ data: inv } = await supabase
+          .from("invoices")
+          .select("id, invoice_number, invoice_date, order_id, created_at, customer_snapshot")
+          .in("order_id", orderIds)
+          .order("created_at", { ascending: false }));
+      }
       setInvoices(inv || []);
     } else {
       setInvoices([]);
@@ -119,14 +141,17 @@ export default function WalkInCustomerPage({
 
     if (crmErr && /walk_in_customers|relation|does not exist/i.test(crmErr.message)) {
       setCrmReady(false);
+      setArchived(false);
     } else if (crm) {
       setCrmReady(true);
+      setArchived(Boolean(crm.deleted_at));
       setFullName(crm.full_name || "");
       setDisplayPhone(crm.display_phone || formatPhoneDisplay(phoneKey));
       setStatus((crm.customer_status || "active") as CustomerStatus);
       setNotes(crm.admin_notes || "");
     } else {
       setCrmReady(true);
+      setArchived(false);
     }
 
     setLoading(false);
@@ -211,6 +236,7 @@ export default function WalkInCustomerPage({
           </div>
         </div>
         <div className="flex gap-2">
+          <WalkInArchiveControls phoneKey={phoneKey} archived={archived} />
           <Link href="/admin/pos">
             <Button variant="outline" className="gap-2">
               <Store className="w-4 h-4" />

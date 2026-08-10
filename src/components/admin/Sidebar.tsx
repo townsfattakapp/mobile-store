@@ -14,7 +14,10 @@ import {
   Store,
   Menu,
   X,
+  LogOut,
+  Archive,
 } from "lucide-react";
+import { adminSignOutAction } from "@/app/(admin)/admin/actions";
 
 const links = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard, exact: true },
@@ -25,6 +28,7 @@ const links = [
   { href: "/admin/categories", label: "Categories", icon: Tags },
   { href: "/admin/brands", label: "Brands", icon: Tags },
   { href: "/admin/invoices", label: "Invoices", icon: FileText },
+  { href: "/admin/data", label: "Data & Trash", icon: Archive },
   { href: "/admin/settings", label: "Settings", icon: Settings },
 ];
 
@@ -114,7 +118,7 @@ function SidebarChrome({
         <NavLinks pathname={pathname} onNavigate={onNavigate} />
       </nav>
 
-      <div className="p-4 border-t border-neutral-200/80">
+      <div className="p-4 border-t border-neutral-200/80 space-y-3">
         <div className="flex items-center gap-3">
           <div className="h-8 w-8 rounded-full bg-neutral-200 flex items-center justify-center text-xs font-semibold text-neutral-600">
             {initials}
@@ -128,6 +132,15 @@ function SidebarChrome({
             </span>
           </div>
         </div>
+        <form action={adminSignOutAction}>
+          <button
+            type="submit"
+            className="w-full flex items-center justify-center gap-2 rounded-lg border border-neutral-200 px-3 py-2 text-sm font-medium text-[#1d1d1f] hover:bg-neutral-100 transition-colors"
+          >
+            <LogOut className="h-4 w-4" />
+            Log out
+          </button>
+        </form>
       </div>
     </aside>
   );

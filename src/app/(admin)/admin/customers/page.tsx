@@ -70,12 +70,37 @@ export default function CustomersPage() {
     const full = await supabase
       .from("profiles")
       .select(
-        "id, email, full_name, phone_number, customer_status, admin_notes, created_at, role"
+        "id, email, full_name, phone_number, customer_status, admin_notes, created_at, role, deleted_at"
       )
       .eq("role", "customer")
+      .is("deleted_at", null)
       .order("created_at", { ascending: false });
 
-    if (full.error && /customer_status|admin_notes/i.test(full.error.message)) {
+    if (full.error && /deleted_at|column|schema cache/i.test(full.error.message)) {
+      const legacyDel = await supabase
+        .from("profiles")
+        .select(
+          "id, email, full_name, phone_number, customer_status, admin_notes, created_at, role"
+        )
+        .eq("role", "customer")
+        .order("created_at", { ascending: false });
+      if (legacyDel.error && /customer_status|admin_notes/i.test(legacyDel.error.message)) {
+        setMigrationHint(
+          "Run supabase/migrations/02_customer_crm.sql for VIP/Blocked & notes on registered customers."
+        );
+        const legacy = await supabase
+          .from("profiles")
+          .select("id, email, full_name, phone_number, created_at, role")
+          .eq("role", "customer")
+          .order("created_at", { ascending: false });
+        profiles = legacy.data;
+      } else if (legacyDel.error) {
+        console.error("Error fetching customers:", legacyDel.error);
+        profiles = [];
+      } else {
+        profiles = legacyDel.data;
+      }
+    } else if (full.error && /customer_status|admin_notes/i.test(full.error.message)) {
       setMigrationHint(
         "Run supabase/migrations/02_customer_crm.sql for VIP/Blocked & notes on registered customers."
       );
@@ -105,10 +130,18 @@ export default function CustomersPage() {
     >();
 
     if (registeredIds.length) {
-      const { data: orders } = await supabase
+      let ordersQuery = supabase
         .from("orders")
         .select("user_id, grand_total, created_at, status")
-        .in("user_id", registeredIds);
+        .in("user_id", registeredIds)
+        .is("deleted_at", null);
+      let { data: orders, error: ordErr } = await ordersQuery;
+      if (ordErr && /deleted_at|column|schema cache/i.test(ordErr.message)) {
+        ({ data: orders } = await supabase
+          .from("orders")
+          .select("user_id, grand_total, created_at, status")
+          .in("user_id", registeredIds));
+      }
 
       for (const o of orders || []) {
         if (!o.user_id) continue;
@@ -153,13 +186,27 @@ export default function CustomersPage() {
     const { data: guestOrders, error: guestErr } = await supabase
       .from("orders")
       .select(
-        "id, user_id, grand_total, created_at, status, notes, address_snapshot"
+        "id, user_id, grand_total, created_at, status, notes, address_snapshot, deleted_at"
       )
       .is("user_id", null)
+      .is("deleted_at", null)
       .order("created_at", { ascending: false })
       .limit(2000);
 
-    if (guestErr) console.error("Error fetching walk-in orders:", guestErr);
+    let guestList: any[] | null = guestOrders;
+    if (guestErr && /deleted_at|column|schema cache/i.test(guestErr.message)) {
+      const fallback = await supabase
+        .from("orders")
+        .select(
+          "id, user_id, grand_total, created_at, status, notes, address_snapshot"
+        )
+        .is("user_id", null)
+        .order("created_at", { ascending: false })
+        .limit(2000);
+      guestList = fallback.data;
+    } else if (guestErr) {
+      console.error("Error fetching walk-in orders:", guestErr);
+    }
 
     type WalkAgg = {
       phone_key: string;
@@ -172,7 +219,7 @@ export default function CustomersPage() {
     };
     const walkMap = new Map<string, WalkAgg>();
 
-    for (const o of guestOrders || []) {
+    for (const o of guestList || []) {
       if (!isWalkInOrder(o)) continue;
       const addr = normalizeAddress(o.address_snapshot);
       const phoneKey = normalizePhoneKey(addr.mobile_number);
@@ -210,10 +257,19 @@ export default function CustomersPage() {
     if (walkMap.size) {
       const { data: crmRows, error: crmErr } = await supabase
         .from("walk_in_customers")
-        .select("phone_key, full_name, customer_status, display_phone")
-        .in("phone_key", [...walkMap.keys()]);
+        .select("phone_key, full_name, customer_status, display_phone, deleted_at")
+        .in("phone_key", [...walkMap.keys()])
+        .is("deleted_at", null);
 
-      if (crmErr && /walk_in_customers|relation|does not exist/i.test(crmErr.message)) {
+      if (crmErr && /deleted_at|column|schema cache/i.test(crmErr.message)) {
+        const crmFb = await supabase
+          .from("walk_in_customers")
+          .select("phone_key, full_name, customer_status, display_phone")
+          .in("phone_key", [...walkMap.keys()]);
+        for (const r of crmFb.data || []) {
+          walkCrm.set(r.phone_key, r);
+        }
+      } else if (crmErr && /walk_in_customers|relation|does not exist/i.test(crmErr.message)) {
         setMigrationHint((h) =>
           [
             h,
@@ -222,11 +278,24 @@ export default function CustomersPage() {
             .filter(Boolean)
             .join(" ")
         );
-      } else {
+      } else if (!crmErr) {
         for (const r of crmRows || []) {
           walkCrm.set(r.phone_key, r);
         }
       }
+
+      // Hide walk-ins that were archived even if they still have (restored?) orders edge case —
+      // also skip archived CRM phones that somehow still have active orders after partial restore
+      const archivedKeys = new Set<string>();
+      const archRes = await supabase
+        .from("walk_in_customers")
+        .select("phone_key")
+        .in("phone_key", [...walkMap.keys()])
+        .not("deleted_at", "is", null);
+      if (!archRes.error) {
+        for (const r of archRes.data || []) archivedKeys.add(r.phone_key);
+      }
+      for (const key of archivedKeys) walkMap.delete(key);
     }
 
     const walkinRows: CustomerRow[] = [...walkMap.values()].map((w) => {

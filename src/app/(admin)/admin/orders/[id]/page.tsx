@@ -7,6 +7,7 @@ import { normalizeAddress } from "@/lib/invoice/types";
 import { normalizePhoneKey } from "@/lib/customers/phone";
 import { OrderStatusPanel } from "./OrderStatusPanel";
 import { ORDER_STATUS_LABEL } from "./orderStatus";
+import { OrderArchiveControls } from "@/components/admin/ArchiveControls";
 
 export const dynamic = "force-dynamic";
 
@@ -86,6 +87,8 @@ export default async function OrderDetailPage({ params }: Props) {
       notes,
       created_at,
       updated_at,
+      deleted_at,
+      delete_reason,
       order_items (
         id,
         product_name,
@@ -171,6 +174,7 @@ export default async function OrderDetailPage({ params }: Props) {
         </div>
 
         <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+          <OrderArchiveControls orderId={order.id} archived={Boolean(order.deleted_at)} />
           {invoice?.id ? (
             <Link href={`/admin/invoices/${invoice.id}`}>
               <Button variant="outline" className="gap-2">
@@ -188,6 +192,14 @@ export default async function OrderDetailPage({ params }: Props) {
           )}
         </div>
       </div>
+
+      {order.deleted_at ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          This order is in Trash
+          {order.delete_reason ? ` — ${order.delete_reason}` : ""}. Restore it to show in active
+          lists again.
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">

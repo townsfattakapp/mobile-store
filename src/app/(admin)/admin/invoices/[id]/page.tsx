@@ -8,11 +8,17 @@ import { Button } from "@/components/ui/Button";
 import { InvoiceDocument } from "@/components/admin/InvoiceDocument";
 import { cancelInvoice, getInvoice } from "../actions";
 import type { InvoiceRecord } from "@/lib/invoice/types";
+import { InvoiceArchiveControls } from "@/components/admin/ArchiveControls";
+
+type InvoiceWithArchive = InvoiceRecord & {
+  deleted_at?: string | null;
+  delete_reason?: string | null;
+};
 
 function InvoiceDetailInner({ id }: { id: string }) {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const [invoice, setInvoice] = useState<InvoiceRecord | null>(null);
+  const [invoice, setInvoice] = useState<InvoiceWithArchive | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [cancelling, setCancelling] = useState(false);
@@ -25,7 +31,7 @@ function InvoiceDetailInner({ id }: { id: string }) {
         setError(res.error || "Invoice not found");
         setInvoice(null);
       } else {
-        setInvoice(res.invoice as InvoiceRecord);
+        setInvoice(res.invoice as InvoiceWithArchive);
       }
       setLoading(false);
     })();
@@ -49,7 +55,7 @@ function InvoiceDetailInner({ id }: { id: string }) {
       return;
     }
     const refreshed = await getInvoice(id);
-    if (refreshed.invoice) setInvoice(refreshed.invoice as InvoiceRecord);
+    if (refreshed.invoice) setInvoice(refreshed.invoice as InvoiceWithArchive);
   };
 
   if (loading) {
@@ -79,7 +85,11 @@ function InvoiceDetailInner({ id }: { id: string }) {
               <Button variant="outline">View Order</Button>
             </Link>
           )}
-          {invoice.status === "issued" && (
+          <InvoiceArchiveControls
+            invoiceId={invoice.id}
+            archived={Boolean(invoice.deleted_at)}
+          />
+          {invoice.status === "issued" && !invoice.deleted_at && (
             <Button
               variant="outline"
               className="gap-2 text-red-600 border-red-200 hover:bg-red-50"
@@ -94,6 +104,13 @@ function InvoiceDetailInner({ id }: { id: string }) {
           </Button>
         </div>
       </div>
+
+      {invoice.deleted_at ? (
+        <div className="print:hidden max-w-4xl mx-auto mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          This invoice is in Trash
+          {invoice.delete_reason ? ` — ${invoice.delete_reason}` : ""}.
+        </div>
+      ) : null}
 
       <div className="max-w-4xl mx-auto bg-white shadow-lg border rounded-xl print:shadow-none print:border-0 print:rounded-none print:max-w-none invoice-sheet">
         <div className="p-8 md:p-10 print:p-0">

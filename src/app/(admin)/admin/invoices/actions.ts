@@ -304,6 +304,7 @@ export async function generateInvoice(input: GenerateInvoiceInput) {
       .select("id, invoice_number, status")
       .eq("order_id", input.orderId)
       .neq("status", "cancelled")
+      .is("deleted_at", null)
       .maybeSingle(),
   ]);
 
@@ -623,7 +624,7 @@ export async function cancelInvoice(invoiceId: string, reason: string) {
 
 export async function listInvoices() {
   const supabase = await createClient();
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("invoices")
     .select(`
       id,
@@ -641,7 +642,30 @@ export async function listInvoices() {
       created_at,
       orders ( id, order_number, payment_method, payment_status, status )
     `)
+    .is("deleted_at", null)
     .order("created_at", { ascending: false });
+
+  if (error && /deleted_at|column|schema cache/i.test(error.message)) {
+    ({ data, error } = await supabase
+      .from("invoices")
+      .select(`
+        id,
+        invoice_number,
+        invoice_date,
+        invoice_type,
+        is_gst,
+        status,
+        financial_year,
+        buyer_gstin,
+        totals_snapshot,
+        customer_snapshot,
+        store_snapshot,
+        order_id,
+        created_at,
+        orders ( id, order_number, payment_method, payment_status, status )
+      `)
+      .order("created_at", { ascending: false }));
+  }
 
   if (error) return { error: error.message, invoices: [] };
   return { invoices: data || [] };
@@ -677,6 +701,7 @@ export async function getOrderForInvoice(orderId: string) {
     .select("id, invoice_number, status")
     .eq("order_id", orderId)
     .neq("status", "cancelled")
+    .is("deleted_at", null)
     .maybeSingle();
 
   return { order, existingInvoice: invoice };
@@ -684,19 +709,38 @@ export async function getOrderForInvoice(orderId: string) {
 
 export async function listOrdersWithoutInvoice() {
   const supabase = await createClient();
-  const { data: orders, error } = await supabase
+  let { data: orders, error } = await supabase
     .from("orders")
     .select("id, order_number, grand_total, created_at, address_snapshot, status, payment_status")
     .neq("status", "cancelled")
+    .is("deleted_at", null)
     .order("created_at", { ascending: false })
     .limit(100);
 
+  if (error && /deleted_at|column|schema cache/i.test(error.message)) {
+    ({ data: orders, error } = await supabase
+      .from("orders")
+      .select("id, order_number, grand_total, created_at, address_snapshot, status, payment_status")
+      .neq("status", "cancelled")
+      .order("created_at", { ascending: false })
+      .limit(100));
+  }
+
   if (error) return { error: error.message, orders: [] };
 
-  const { data: invoices } = await supabase
+  let { data: invoices } = await supabase
     .from("invoices")
     .select("order_id")
-    .neq("status", "cancelled");
+    .neq("status", "cancelled")
+    .is("deleted_at", null);
+
+  if (!invoices) {
+    const fb = await supabase
+      .from("invoices")
+      .select("order_id")
+      .neq("status", "cancelled");
+    invoices = fb.data;
+  }
 
   const invoiced = new Set((invoices || []).map((i: any) => i.order_id));
   return {

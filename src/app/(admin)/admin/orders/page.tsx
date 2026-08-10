@@ -29,13 +29,23 @@ export default function OrdersPage() {
 
   const fetchOrders = async () => {
     setLoading(true);
-    const { data, error } = await supabase
+    let query = supabase
       .from("orders")
       .select(`
         *,
         order_items(id)
       `)
+      .is("deleted_at", null)
       .order("created_at", { ascending: false });
+
+    let { data, error } = await query;
+
+    if (error && /deleted_at|column|schema cache/i.test(error.message)) {
+      ({ data, error } = await supabase
+        .from("orders")
+        .select(`*, order_items(id)`)
+        .order("created_at", { ascending: false }));
+    }
       
     if (error) {
       console.error("Error fetching orders:", error);
@@ -73,7 +83,12 @@ export default function OrdersPage() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Orders</h1>
-          <p className="text-gray-500 text-sm mt-1">Manage and track customer orders.</p>
+          <p className="text-gray-500 text-sm mt-1">
+            Manage and track customer orders.{" "}
+            <Link href="/admin/data" className="text-[#3b2f7c] font-medium hover:underline">
+              Archive / Trash
+            </Link>
+          </p>
         </div>
       </div>
 

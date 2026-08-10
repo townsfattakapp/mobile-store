@@ -50,6 +50,7 @@ export default function AdminDashboard() {
         sb
           .from("orders")
           .select("id, order_number, grand_total, status, created_at, address_snapshot, user_id")
+          .is("deleted_at", null)
           .order("created_at", { ascending: false })
           .limit(8),
         sb
@@ -59,24 +60,36 @@ export default function AdminDashboard() {
         sb
           .from("profiles")
           .select("id", { count: "exact", head: true })
-          .eq("role", "customer"),
+          .eq("role", "customer")
+          .is("deleted_at", null),
         sb
           .from("orders")
           .select("id", { count: "exact", head: true })
-          .is("user_id", null),
+          .is("user_id", null)
+          .is("deleted_at", null),
       ]);
 
       if (cancelled) return;
 
-      const orders = (ordersRes.data || []) as RecentOrder[];
+      let orders = (ordersRes.data || []) as RecentOrder[];
+      if (ordersRes.error && /deleted_at|column|schema cache/i.test(ordersRes.error.message)) {
+        const fb = await sb
+          .from("orders")
+          .select("id, order_number, grand_total, status, created_at, address_snapshot, user_id")
+          .order("created_at", { ascending: false })
+          .limit(8);
+        orders = (fb.data || []) as RecentOrder[];
+      }
+
       const sales = orders
         .filter((o) => o.status !== "cancelled" && o.status !== "refunded")
         .reduce((s, o) => s + (Number(o.grand_total) || 0), 0);
 
       // Approximate totals from limited fetch — also get full counts
-      const { count: orderCount } = await sb
+      let { count: orderCount } = await sb
         .from("orders")
-        .select("id", { count: "exact", head: true });
+        .select("id", { count: "exact", head: true })
+        .is("deleted_at", null);
 
       const { data: paidOrders } = await sb
         .from("orders")

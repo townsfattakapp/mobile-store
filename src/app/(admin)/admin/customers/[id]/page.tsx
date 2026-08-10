@@ -19,6 +19,7 @@ import {
   updateCustomerProfile,
   type CustomerStatus,
 } from "../actions";
+import { CustomerArchiveControls } from "@/components/admin/ArchiveControls";
 
 type Profile = {
   id: string;
@@ -29,6 +30,7 @@ type Profile = {
   admin_notes: string | null;
   created_at: string;
   updated_at: string;
+  deleted_at?: string | null;
 };
 
 function statusBadge(status: string) {
@@ -94,7 +96,7 @@ export default function CustomerDetailPage({
     const full = await supabase
       .from("profiles")
       .select(
-        "id, email, full_name, phone_number, customer_status, admin_notes, created_at, updated_at, role"
+        "id, email, full_name, phone_number, customer_status, admin_notes, created_at, updated_at, role, deleted_at"
       )
       .eq("id", id)
       .maybeSingle();
@@ -140,6 +142,7 @@ export default function CustomerDetailPage({
       admin_notes: prof.admin_notes ?? null,
       created_at: prof.created_at,
       updated_at: prof.updated_at,
+      deleted_at: prof.deleted_at ?? null,
     });
     setFullName(prof.full_name || "");
     setPhone(prof.phone_number || "");
@@ -153,6 +156,7 @@ export default function CustomerDetailPage({
           "id, order_number, grand_total, payment_method, payment_status, status, created_at, address_snapshot"
         )
         .eq("user_id", id)
+        .is("deleted_at", null)
         .order("created_at", { ascending: false }),
       supabase
         .from("addresses")
@@ -161,16 +165,36 @@ export default function CustomerDetailPage({
         .order("is_default", { ascending: false }),
     ]);
 
-    setOrders(ordersRes.data || []);
+    let orderRows = ordersRes.data || [];
+    if (ordersRes.error && /deleted_at|column|schema cache/i.test(ordersRes.error.message)) {
+      const fb = await supabase
+        .from("orders")
+        .select(
+          "id, order_number, grand_total, payment_method, payment_status, status, created_at, address_snapshot"
+        )
+        .eq("user_id", id)
+        .order("created_at", { ascending: false });
+      orderRows = fb.data || [];
+    }
+
+    setOrders(orderRows);
     setAddresses(addrRes.data || []);
 
-    const orderIds = (ordersRes.data || []).map((o) => o.id);
+    const orderIds = orderRows.map((o) => o.id);
     if (orderIds.length) {
-      const inv = await supabase
+      let inv = await supabase
         .from("invoices")
         .select("id, invoice_number, invoice_date, order_id, created_at")
         .in("order_id", orderIds)
+        .is("deleted_at", null)
         .order("created_at", { ascending: false });
+      if (inv.error && /deleted_at|column|schema cache/i.test(inv.error.message)) {
+        inv = await supabase
+          .from("invoices")
+          .select("id, invoice_number, invoice_date, order_id, created_at")
+          .in("order_id", orderIds)
+          .order("created_at", { ascending: false });
+      }
       setInvoices(inv.data || []);
     } else {
       setInvoices([]);
@@ -260,10 +284,16 @@ export default function CustomerDetailPage({
             </p>
           </div>
         </div>
-        <Button onClick={onSave} isLoading={saving} className="gap-2">
-          <Save className="w-4 h-4" />
-          Save changes
-        </Button>
+        <div className="flex gap-2">
+          <CustomerArchiveControls
+            profileId={profile.id}
+            archived={Boolean(profile.deleted_at)}
+          />
+          <Button onClick={onSave} isLoading={saving} className="gap-2">
+            <Save className="w-4 h-4" />
+            Save changes
+          </Button>
+        </div>
       </div>
 
       {!crmEnabled && (
