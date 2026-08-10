@@ -235,12 +235,187 @@ export default function GiveawaysAdminPage() {
               }
             />
           </div>
-          <div className="rounded-lg border p-3 space-y-2">
-            <p className="text-sm font-semibold">Default entry rules</p>
-            <p className="text-xs text-gray-500">
-              Join +1 · Share +1 (24h cooldown) · Referral +2 · Purchase tiers ₹20k/+5 and ₹50k/+10.
-              Edit on the detail page after create if needed.
-            </p>
+          <div className="rounded-lg border p-3 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold">Entry rules</p>
+                <p className="text-xs text-gray-500">
+                  Starting defaults — change entries, purchase ₹ thresholds, or add/remove rules before create.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="text-xs font-medium underline underline-offset-2 shrink-0"
+                onClick={() =>
+                  setForm((f) => ({
+                    ...f,
+                    rules: [
+                      ...(f.rules || []),
+                      {
+                        action_type: "purchase",
+                        entries: 5,
+                        min_order_amount: 20000,
+                        enabled: true,
+                        configuration: {},
+                      },
+                    ],
+                  }))
+                }
+              >
+                Add rule
+              </button>
+            </div>
+
+            {(form.rules || []).map((r, idx) => (
+              <div
+                key={idx}
+                className="grid grid-cols-2 md:grid-cols-6 gap-2 items-end rounded-md bg-gray-50 p-2"
+              >
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Action</label>
+                  <select
+                    className="w-full h-10 border rounded-lg px-2 text-sm bg-white"
+                    value={r.action_type}
+                    onChange={(e) => {
+                      const rules = [...(form.rules || [])];
+                      const action_type = e.target.value;
+                      rules[idx] = {
+                        ...rules[idx],
+                        action_type,
+                        configuration:
+                          action_type === "whatsapp_share"
+                            ? {
+                                ...(rules[idx].configuration || {}),
+                                cooldown_hours:
+                                  Number(
+                                    (rules[idx].configuration as any)?.cooldown_hours
+                                  ) || 24,
+                              }
+                            : rules[idx].configuration || {},
+                      };
+                      setForm((f) => ({ ...f, rules }));
+                    }}
+                  >
+                    {[
+                      "join",
+                      "referral",
+                      "whatsapp_share",
+                      "purchase",
+                      "bonus",
+                      "social_action",
+                    ].map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <Input
+                  label="Entries"
+                  type="number"
+                  value={r.entries}
+                  onChange={(e) => {
+                    const rules = [...(form.rules || [])];
+                    rules[idx] = { ...rules[idx], entries: Number(e.target.value) || 0 };
+                    setForm((f) => ({ ...f, rules }));
+                  }}
+                />
+                <Input
+                  label="Min ₹"
+                  type="number"
+                  placeholder={r.action_type === "purchase" ? "e.g. 20000" : "—"}
+                  value={r.min_order_amount ?? ""}
+                  onChange={(e) => {
+                    const rules = [...(form.rules || [])];
+                    rules[idx] = {
+                      ...rules[idx],
+                      min_order_amount: e.target.value ? Number(e.target.value) : null,
+                    };
+                    setForm((f) => ({ ...f, rules }));
+                  }}
+                />
+                <Input
+                  label="Max ₹"
+                  type="number"
+                  placeholder="optional"
+                  value={r.max_order_amount ?? ""}
+                  onChange={(e) => {
+                    const rules = [...(form.rules || [])];
+                    rules[idx] = {
+                      ...rules[idx],
+                      max_order_amount: e.target.value ? Number(e.target.value) : null,
+                    };
+                    setForm((f) => ({ ...f, rules }));
+                  }}
+                />
+                {r.action_type === "whatsapp_share" ? (
+                  <Input
+                    label="Cooldown (hours)"
+                    type="number"
+                    min={1}
+                    value={
+                      Number((r.configuration as any)?.cooldown_hours) || 24
+                    }
+                    onChange={(e) => {
+                      const rules = [...(form.rules || [])];
+                      rules[idx] = {
+                        ...rules[idx],
+                        configuration: {
+                          ...(rules[idx].configuration || {}),
+                          cooldown_hours: Number(e.target.value) || 24,
+                        },
+                      };
+                      setForm((f) => ({ ...f, rules }));
+                    }}
+                  />
+                ) : (
+                  <label className="flex items-center gap-2 text-sm h-10 md:mt-6">
+                    <input
+                      type="checkbox"
+                      checked={r.enabled !== false}
+                      onChange={(e) => {
+                        const rules = [...(form.rules || [])];
+                        rules[idx] = { ...rules[idx], enabled: e.target.checked };
+                        setForm((f) => ({ ...f, rules }));
+                      }}
+                    />
+                    Enabled
+                  </label>
+                )}
+                <div className="flex items-center gap-2 h-10 md:mt-6">
+                  {r.action_type === "whatsapp_share" ? (
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={r.enabled !== false}
+                        onChange={(e) => {
+                          const rules = [...(form.rules || [])];
+                          rules[idx] = { ...rules[idx], enabled: e.target.checked };
+                          setForm((f) => ({ ...f, rules }));
+                        }}
+                      />
+                      On
+                    </label>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="text-xs text-red-600 ml-auto"
+                    onClick={() => {
+                      const rules = (form.rules || []).filter((_, i) => i !== idx);
+                      setForm((f) => ({ ...f, rules }));
+                    }}
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            {(form.rules || []).length === 0 ? (
+              <p className="text-xs text-amber-800">
+                No rules — add at least a Join rule or entries won’t be awarded.
+              </p>
+            ) : null}
           </div>
           <Button type="submit" disabled={saving}>
             {saving ? "Saving…" : "Create giveaway"}
