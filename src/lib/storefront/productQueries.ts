@@ -53,9 +53,7 @@ export async function getCategoryIdBySlug(
  * Drop obvious non-phone devices when category_id is missing / unset.
  * Used as a safety net alongside smartphones-* category filters.
  */
-export function excludeNonPhoneNameFilter<T extends { not: (col: string, op: string, val: string) => T }>(
-  query: T
-): T {
+export function excludeNonPhoneNameFilter(query: any): any {
   return query
     .not("name", "ilike", "%laptop%")
     .not("name", "ilike", "%macbook%")
