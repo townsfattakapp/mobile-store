@@ -15,6 +15,7 @@ import {
 import { getStorefrontProfile } from "@/lib/store/profile";
 import { brandLogoParts } from "@/lib/store/profile-shared";
 import { ProductPhoto } from "@/components/storefront/ProductPhoto";
+import { HomeGiveawayBanner } from "@/components/storefront/home/HomeGiveawayBanner";
 import {
   NON_PHONE_CATEGORY_SLUGS,
   applyPhoneHubFilters,
@@ -94,13 +95,40 @@ export default async function HomePage() {
   usedQ = applyPhoneHubFilters(usedQ, excludeCategoryIds);
   featuredQ = applyPhoneHubFilters(featuredQ, excludeCategoryIds);
 
-  const [launchesRes, usedRes, brandsRes, featuredRes, store] = await Promise.all([
-    launchesQ,
-    usedQ,
-    supabase.from("brands").select("id, name, slug").order("name"),
-    featuredQ,
-    getStorefrontProfile(),
-  ]);
+  const [launchesRes, usedRes, brandsRes, featuredRes, store, activeGiveaway] =
+    await Promise.all([
+      launchesQ,
+      usedQ,
+      supabase.from("brands").select("id, name, slug").order("name"),
+      featuredQ,
+      getStorefrontProfile(),
+      (async () => {
+        try {
+          const now = new Date().toISOString();
+          const { data } = await supabase
+            .from("giveaways")
+            .select("slug, title, prize_title, end_at, start_at, status")
+            .eq("status", "active")
+            .order("created_at", { ascending: false })
+            .limit(5);
+          const live = (data || []).find((g) => {
+            if (g.start_at && g.start_at > now) return false;
+            if (g.end_at && g.end_at < now) return false;
+            return true;
+          });
+          return live
+            ? {
+                slug: live.slug,
+                title: live.title,
+                prize_title: live.prize_title,
+                end_at: live.end_at,
+              }
+            : null;
+        } catch {
+          return null;
+        }
+      })(),
+    ]);
 
   const launches = (launchesRes.data || []) as HomeProduct[];
   const used = (usedRes.data || []) as HomeProduct[];
@@ -124,6 +152,8 @@ export default async function HomePage() {
   return (
     <div className="ms-page">
       <HomeHero featured={heroProducts} store={store} />
+
+      {activeGiveaway ? <HomeGiveawayBanner promo={activeGiveaway} /> : null}
 
       <HomeBrandRail brands={brands} />
 

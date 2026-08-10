@@ -17,6 +17,7 @@ import {
   LogOut,
   Archive,
   TicketPercent,
+  Gift,
 } from "lucide-react";
 import { adminSignOutAction } from "@/app/(admin)/admin/actions";
 
@@ -27,6 +28,7 @@ const links = [
   { href: "/admin/customers", label: "Customers", icon: Users },
   { href: "/admin/pos", label: "Walk-in POS", icon: Store },
   { href: "/admin/promo-codes", label: "Promo Codes", icon: TicketPercent },
+  { href: "/admin/giveaways", label: "Giveaways", icon: Gift },
   { href: "/admin/categories", label: "Categories", icon: Tags },
   { href: "/admin/brands", label: "Brands", icon: Tags },
   { href: "/admin/invoices", label: "Invoices", icon: FileText },

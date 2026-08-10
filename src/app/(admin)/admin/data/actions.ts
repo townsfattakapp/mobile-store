@@ -79,6 +79,13 @@ export async function softDeleteOrder(orderId: string, reason = "Archived by adm
     // non-fatal
   }
 
+  try {
+    const { reverseGiveawayEntriesForOrder } = await import("@/lib/giveaway/server");
+    await reverseGiveawayEntriesForOrder(orderId);
+  } catch {
+    // non-fatal
+  }
+
   // Cancel issued invoices so a new invoice can be issued later if needed, then archive
   await auth.supabase
     .from("invoices")

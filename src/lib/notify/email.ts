@@ -63,3 +63,50 @@ export async function sendOwnerOrderEmail(opts: {
     return { ok: false, error: e?.message || "Email send failed" };
   }
 }
+
+/** Customer-facing email (giveaway winners, etc.) via same Resend setup. */
+export async function sendCustomerEmail(opts: {
+  to: string;
+  subject: string;
+  text: string;
+  html?: string;
+}): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
+  const apiKey = (process.env.RESEND_API_KEY || "").trim();
+  if (!apiKey) {
+    return { ok: false, skipped: true, error: "RESEND_API_KEY not set" };
+  }
+
+  const to = String(opts.to || "").trim();
+  if (!to || !to.includes("@")) {
+    return { ok: false, error: "Invalid recipient email" };
+  }
+
+  const from =
+    (process.env.ORDER_NOTIFY_FROM_EMAIL || "").trim() ||
+    "Mahadev Mobiles <onboarding@resend.dev>";
+
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from,
+        to: [to],
+        subject: opts.subject,
+        text: opts.text,
+        html: opts.html || undefined,
+      }),
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      return { ok: false, error: `Resend ${res.status}: ${body.slice(0, 200)}` };
+    }
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || "Email send failed" };
+  }
+}

@@ -76,6 +76,15 @@ export async function POST(req: NextRequest) {
     // Second owner ping when online payment succeeds
     await notifyOwnerOfOrderById(dbOrderId, "payment_confirmed");
 
+    try {
+      const { awardGiveawayEntriesForPaidOrder } = await import(
+        "@/lib/giveaway/server"
+      );
+      await awardGiveawayEntriesForPaidOrder(dbOrderId);
+    } catch (e) {
+      console.warn("giveaway purchase award failed", e);
+    }
+
     return NextResponse.json({
       success: true,
       orderNumber: order.order_number,

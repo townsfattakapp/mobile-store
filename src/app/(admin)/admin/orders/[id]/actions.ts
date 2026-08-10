@@ -90,6 +90,15 @@ export async function updateOrderStatusAction(orderId: string, status: string) {
     await voidPromoRedemptionForOrder(orderId);
   }
 
+  if (status === "cancelled" || status === "refunded") {
+    try {
+      const { reverseGiveawayEntriesForOrder } = await import("@/lib/giveaway/server");
+      await reverseGiveawayEntriesForOrder(orderId);
+    } catch (e) {
+      console.warn("giveaway reverse failed", e);
+    }
+  }
+
   revalidatePath(`/admin/orders/${orderId}`);
   revalidatePath("/admin/orders");
   return { success: true };
@@ -133,6 +142,26 @@ export async function updatePaymentStatusAction(orderId: string, paymentStatus: 
     `Payment status changed from ${current.payment_status} to ${paymentStatus}`,
     user.id
   );
+
+  if (paymentStatus === "paid" && current.payment_status !== "paid") {
+    try {
+      const { awardGiveawayEntriesForPaidOrder } = await import(
+        "@/lib/giveaway/server"
+      );
+      await awardGiveawayEntriesForPaidOrder(orderId);
+    } catch (e) {
+      console.warn("giveaway purchase award failed", e);
+    }
+  }
+
+  if (paymentStatus === "refunded") {
+    try {
+      const { reverseGiveawayEntriesForOrder } = await import("@/lib/giveaway/server");
+      await reverseGiveawayEntriesForOrder(orderId);
+    } catch (e) {
+      console.warn("giveaway reverse failed", e);
+    }
+  }
 
   revalidatePath(`/admin/orders/${orderId}`);
   revalidatePath("/admin/orders");

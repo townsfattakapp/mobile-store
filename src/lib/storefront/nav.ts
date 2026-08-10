@@ -18,6 +18,7 @@ export const PRIMARY_NAV: PrimaryNavItem[] = [
   { id: "laptops", label: "Laptops", href: "/c/laptops-new" },
   { id: "accessories", label: "Accessories", href: "/accessories" },
   { id: "parts", label: "Parts", href: "/parts" },
+  { id: "giveaways", label: "Giveaways", href: "/giveaways" },
 ];
 
 /** Compact footer shop column — hubs + all-categories. */
@@ -28,6 +29,7 @@ export const FOOTER_SHOP_LINKS: { href: string; label: string }[] = [
   { href: "/c/laptops-new", label: "Laptops" },
   { href: "/accessories", label: "Accessories" },
   { href: "/parts", label: "Spare Parts" },
+  { href: "/giveaways", label: "Giveaways" },
   { href: "/categories", label: "All categories" },
 ];
 
@@ -76,6 +78,9 @@ export function resolveActivePrimaryNav(pathname: string): string | null {
   }
   if (pathname.startsWith("/accessories") || isAccessoryCategoryPath(pathname)) {
     return "accessories";
+  }
+  if (pathname.startsWith("/giveaway") || pathname.startsWith("/giveaways")) {
+    return "giveaways";
   }
   return null;
 }
